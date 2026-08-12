@@ -1,0 +1,34 @@
+name: Payday text
+
+on:
+  schedule:
+    # Friday 11:23 UTC = 7:23am EDT / 6:23am EST. The script exits quietly
+    # on non-payday Fridays (paydays are every 14 days from the anchor).
+    - cron: '23 11 * * 5'
+  workflow_dispatch:
+    inputs:
+      fake_today:
+        description: 'Pretend today is this date (YYYY-MM-DD), for testing'
+        required: false
+      dry_run:
+        description: 'Set to "1" to print the message without sending'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute and send payday breakdown
+        env:
+          SMS_TO: ${{ secrets.SMS_TO }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          LEDGER_TOKEN: ${{ secrets.LEDGER_TOKEN }}
+          LEDGER_REPO: ${{ secrets.LEDGER_REPO }}
+          FAKE_TODAY: ${{ inputs.fake_today }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python3 scripts/payday_text.py
