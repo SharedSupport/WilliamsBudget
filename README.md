@@ -12,16 +12,7 @@ If you'd rather nothing be public at all, see "Private hosting" below.
 
 ## Deploy to GitHub Pages
 
-```bash
-git init
-git add .
-git commit -m "Household ledger"
-git branch -M main
-git remote add origin git@github.com:YOURNAME/ledger.git
-git push -u origin main
-```
-
-Then **Settings → Pages → Source: Deploy from a branch → main → / (root)**. Live in about a minute at `https://YOURNAME.github.io/ledger/`.
+Deployment is automatic: `.github/workflows/pages.yml` publishes the site to GitHub Pages on every push. The repo must be public (or on a paid GitHub plan) for Pages to work. The site lands at `https://YOURNAME.github.io/REPONAME/`.
 
 ## Install on your phones
 
