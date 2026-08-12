@@ -273,7 +273,9 @@ function seed(){ return {
     {m:'inspection',c:'Automotive'},{m:'automotive',c:'Automotive'},{m:'transmission',c:'Automotive'},{m:'muffler',c:'Automotive'},
     {m:'cvs',c:'Personal'},{m:'walgreens',c:'Personal'},{m:'rite aid',c:'Personal'},{m:'ulta',c:'Personal'},
     {m:'sephora',c:'Personal'},{m:'great clips',c:'Personal'},{m:'salon',c:'Personal'},{m:'barber',c:'Personal'},
-    {m:'pharmacy',c:'Personal'}
+    {m:'pharmacy',c:'Personal'},
+    {m:'payroll',c:'Paycheck'},{m:'direct dep',c:'Paycheck'},
+    {m:'bonus',c:'Income'},{m:'dividend',c:'Income'},{m:'interest',c:'Income'},{m:'reimbursement',c:'Income'}
   ]
 };}
 
@@ -295,6 +297,10 @@ const save=(queue=true)=>{
 
 /* ---------- helpers ---------- */
 const CATS=['Groceries','Gas','Restaurants','Entertainment','Household','Automotive','Personal','Other'];
+/* Money coming in: 'Paycheck' is covered by the payday schedule (never
+   double-counted); 'Income' is extra — bonuses, side money — and adds to
+   the month's income totals. */
+const ALLCATS=[...CATS,'Income','Paycheck'];
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:Math.abs(n)>=1000?0:2}).format(n||0);
 const money2=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n||0);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -748,7 +754,8 @@ function incomeExpenseMonths(n){
   for(let i=n-1;i>=0;i--){
     const d=new Date(t.getFullYear(),t.getMonth()-i,1),me=new Date(d.getFullYear(),d.getMonth()+1,0),k=mkey(d);
     out.push({label:d.toLocaleDateString('en-US',{month:'short'}),
-      inc:paydays(d,me).length*pay,
+      inc:paydays(d,me).length*pay
+         +D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount>0&&x.category==='Income').reduce((s,x)=>s+x.amount,0),
       exp:billsBetween(d,me).reduce((s,x)=>s+x.amount,0)
          +D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount<0).reduce((s,x)=>s+(-x.amount),0)});
   }
@@ -772,13 +779,13 @@ function viewSpend(){
   const vm=viewMonth(), m=mkey(vm);
   const tx=D.txns.filter(x=>x.date.slice(0,7)===m).sort((a,b)=>b.date.localeCompare(a.date));
   const by={}; tx.filter(x=>x.amount<0).forEach(x=>by[x.category||'Other']=(by[x.category||'Other']||0)+(-x.amount));
-  const cats=[...new Set([...CATS,...Object.keys(by)])];
+  const cats=[...new Set([...ALLCATS,...Object.keys(by)])];
   const unc=tx.filter(x=>!x.category).length;
   const ie=incomeExpenseMonths(6), cur=ie[ie.length-1], net=cur.inc-cur.exp;
   return `
   <div class="card">
     <h2>Income vs expenses</h2>
-    <p class="chelp">Paychecks landing each month vs bills due plus spending.</p>
+    <p class="chelp">Paychecks plus anything marked Income, vs bills due plus spending. Paycheck deposits are never double-counted.</p>
     <div class="cbody">
       ${svgIncExp(ie)}
       <div class="statkey" style="margin-top:8px">
@@ -912,8 +919,8 @@ function sheetTxn(){
         <label class="f"><span>Amount</span><input id="tx-amt" type="number" step="0.01" inputmode="decimal" placeholder="42.18"></label>
         <label class="f"><span>Date</span><input id="tx-date" type="date" value="${iso(today())}"></label>
       </div>
-      <label class="f"><span>Category</span><select id="tx-cat">${CATS.map(c=>`<option>${c}</option>`).join('')}</select></label>
-      <button class="btn pri wide" data-act="save-txn">Save purchase</button>
+      <label class="f"><span>Category</span><select id="tx-cat">${ALLCATS.map(c=>`<option>${c}</option>`).join('')}</select></label>
+      <button class="btn pri wide" data-act="save-txn">Save</button>
     </div></div>`));
 }
 function sheetBudgets(){
@@ -1064,7 +1071,8 @@ function txnsFromLines(lines){
     const y=dm[3]?(+dm[3]<100?2000+ +dm[3]:+dm[3]):fy;
     const d=new Date(y,+dm[1]-1,+dm[2]); if(isNaN(d)) return;
     const {desc:md,loc}=extractLoc(desc);
-    out.push({id:uid(),date:iso(d),desc:md.slice(0,60),amount:a,category:catFor(md),
+    out.push({id:uid(),date:iso(d),desc:md.slice(0,60),amount:a,
+      category:catFor(md)||(a>0?'Income':''),
       location:loc||undefined,account:acct||undefined});
   });
   return out;
@@ -1153,7 +1161,7 @@ function csvRows(){
     if(sign==='pos') amt=-Math.abs(amt);
     const d=new Date(r[di]); if(isNaN(d)) return null;
     const {desc,loc}=extractLoc((r[si]||'').trim());
-    return {id:uid(),date:iso(d),desc,amount:amt,category:catFor(desc),location:loc||undefined};
+    return {id:uid(),date:iso(d),desc,amount:amt,category:catFor(desc)||(amt>0?'Income':''),location:loc||undefined};
   }).filter(Boolean);
 }
 function csvPreview(){
@@ -1235,7 +1243,7 @@ async function syncNow(){
 
 function sheetTxnDetail(id){
   const x=D.txns.find(t=>t.id===id); if(!x) return;
-  const cats=[...new Set([...CATS,...(x.category?[x.category]:[])])];
+  const cats=[...new Set([...ALLCATS,...(x.category?[x.category]:[])])];
   openSheet(shell('Transaction',`<div class="card"><div class="cbody">
     <input type="hidden" id="td-id" value="${esc(x.id)}">
     <label class="f"><span>Description</span><input id="td-desc" value="${esc(x.desc||'')}"></label>
@@ -1327,7 +1335,8 @@ document.addEventListener('click',e=>{
   const a=el.dataset.act, g=id=>document.getElementById(id), v=id=>g(id).value.trim();
   if(a==='save-txn'){
     const amt=parseFloat(v('tx-amt')); if(isNaN(amt)) return g('tx-amt').focus();
-    D.txns.push({id:uid(),date:v('tx-date'),desc:v('tx-desc'),amount:-Math.abs(amt),category:v('tx-cat')});
+    const cat=v('tx-cat'), isIn=cat==='Income'||cat==='Paycheck';
+    D.txns.push({id:uid(),date:v('tx-date'),desc:v('tx-desc'),amount:isIn?Math.abs(amt):-Math.abs(amt),category:cat});
     save(); closeSheet(); render();
   }
   else if(a==='save-bill'){

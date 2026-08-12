@@ -150,7 +150,7 @@ def build_message(D, today):
     end = today + timedelta(days=13)
     items = build_plan(D, today, anchor)
     total = sum(a for _, _, a, _ in items)
-    lines = [f"Payday! ${pay:,.0f} in. Bills thru {end.month}/{end.day}: ${total:,.0f}"]
+    lines = [f"Payday tomorrow: ${pay:,.0f} in. Bills thru {end.month}/{end.day}: ${total:,.0f}"]
     lines += [f"{d.month}/{d.day} {n[:18]} ${a:,.0f}" + (" (early)" if e else "") for d, n, a, e in items]
     left = pay - total
     lines.append(("Left: $" + f"{left:,.0f}") if left >= 0 else ("SHORT $" + f"{-left:,.0f}"))
@@ -162,10 +162,11 @@ def main():
     today = parse_d(os.environ["FAKE_TODAY"]) if os.environ.get("FAKE_TODAY") else date.today()
     D, source = load_ledger()
     anchor = parse_d(D["income"]["anchorPayday"])
-    if (today - anchor).days % 14 != 0:
-        print(f"{today} is not a payday (anchor {anchor}); nothing to send")
+    payday = today + timedelta(days=1)  # runs Thursdays; the check lands Friday
+    if (payday - anchor).days % 14 != 0:
+        print(f"{payday} is not a payday (anchor {anchor}); nothing to send")
         return
-    msg = build_message(D, today)
+    msg = build_message(D, payday)
     print(f"[{source} data] message ({len(msg)} chars):\n{msg}")
     if os.environ.get("DRY_RUN"):
         return

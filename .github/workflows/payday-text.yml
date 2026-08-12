@@ -2,9 +2,9 @@ name: Payday text
 
 on:
   schedule:
-    # Friday 11:23 UTC = 7:23am EDT / 6:23am EST. The script exits quietly
-    # on non-payday Fridays (paydays are every 14 days from the anchor).
-    - cron: '23 11 * * 5'
+    # Thursday 11:23 UTC = 7:23am EDT / 6:23am EST. The script sends only
+    # when TOMORROW is a payday, so the heads-up lands the day before.
+    - cron: '23 11 * * 4'
   workflow_dispatch:
     inputs:
       fake_today:
