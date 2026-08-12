@@ -124,6 +124,18 @@ table.prev th{text-align:left;font-weight:500;color:var(--muted);font-size:10.5p
 table.prev td{padding:6px;border-bottom:1px solid var(--line)}
 .pos{color:var(--good)}
 .neg{color:var(--alert)}
+
+/* PIN lock */
+#lock{position:fixed;inset:0;background:var(--deep);z-index:100;display:none;align-items:center;justify-content:center;padding:20px}
+#lock.on{display:flex}
+.lockbox{width:100%;max-width:300px;text-align:center;color:#EAF0F4}
+.lockbox .eyebrow{color:#7EA0B4}
+.lockbox h1{font-size:20px;font-weight:600;margin:6px 0 16px}
+.lockbox input{text-align:center;font-size:24px;letter-spacing:.35em;font-family:'IBM Plex Mono',monospace;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.22);color:#fff;margin-bottom:10px}
+.lockbox input:focus{outline:2px solid #2E7DA6;outline-offset:2px}
+#pin-go{background:#EAF0F4;border-color:#EAF0F4;color:var(--deep);font-weight:600}
+#pin-err{color:#F0A9A4;font-size:13px;min-height:18px;margin:10px 0 0}
+body.locked{overflow:hidden}
 .note{font-size:12px;color:var(--muted);margin:8px 2px 0}
 @media (prefers-reduced-motion:no-preference){
   .card,.stat{animation:rise .3s ease both}
@@ -132,6 +144,16 @@ table.prev td{padding:6px;border-bottom:1px solid var(--line)}
 </style>
 </head>
 <body>
+
+<div id="lock" role="dialog" aria-modal="true" aria-label="Enter PIN">
+  <div class="lockbox">
+    <div class="eyebrow">Household Ledger</div>
+    <h1>Enter PIN</h1>
+    <input id="pin-in" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="PIN">
+    <button class="btn pri wide" id="pin-go">Unlock</button>
+    <p id="pin-err"></p>
+  </div>
+</div>
 
 <header>
   <div class="wrap" id="hdr"></div>
@@ -812,6 +834,35 @@ function render(){
     ({home:viewHome,bills:viewBills,spend:viewSpend,debt:viewDebt,goals:viewGoals}[TAB])();
 }
 render();
+
+/* ---------- PIN lock ----------
+   Keeps casual visitors out of the app screen. It is NOT encryption:
+   the app shell and seed figures are readable in the page source
+   regardless, and the hash below can be brute-forced offline. */
+const PIN_HASH='5250d223be7bfba78d903ae226a7ed27cd5a282808082c4bb55b45dde4721688';
+const sget=k=>{try{return sessionStorage.getItem(k)}catch(e){return null}};
+const sset=(k,v)=>{try{sessionStorage.setItem(k,v)}catch(e){}};
+async function sha256(s){
+  const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+(function lockInit(){
+  // crypto.subtle needs a secure context (https / localhost); skip the gate elsewhere
+  if(!(window.crypto&&crypto.subtle)||sget('ledger.unlocked')==='1') return;
+  const el=document.getElementById('lock'), inp=document.getElementById('pin-in'), err=document.getElementById('pin-err');
+  el.classList.add('on'); document.body.classList.add('locked');
+  const tryPin=async()=>{
+    if(!inp.value) return inp.focus();
+    if(await sha256(inp.value)===PIN_HASH){
+      sset('ledger.unlocked','1');
+      el.classList.remove('on'); document.body.classList.remove('locked');
+    } else { err.textContent='That PIN is not right. Try again.'; inp.value=''; inp.focus(); }
+  };
+  document.getElementById('pin-go').addEventListener('click',tryPin);
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter') tryPin(); });
+  inp.focus();
+})();
+
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
