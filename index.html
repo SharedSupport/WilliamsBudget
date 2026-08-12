@@ -91,6 +91,20 @@ main{padding-top:14px}
 .tag.soon{background:#F6E7D3;color:var(--due)}
 .tag.late{background:#F5DAD8;color:var(--alert)}
 
+/* Calendar */
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;padding:10px 15px 6px}
+.cal .dow{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.08em;color:var(--muted);text-align:center;text-transform:uppercase;padding-bottom:2px}
+.cday{position:relative;aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:9px;font-size:13px;border:1.5px solid transparent;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:inherit}
+.cday:disabled{cursor:default}
+.cday.pay{background:#D9EBE6;color:var(--good);font-weight:600}
+.cday.tod{border-color:var(--deep);font-weight:600}
+.cday.sel{background:var(--deep);color:#fff}
+.cday.sel.pay{background:var(--good);color:#fff}
+.cday .dots{position:absolute;bottom:3px;display:flex;gap:2.5px}
+.cday .dots i{width:4.5px;height:4.5px;border-radius:50%;display:block}
+.callegend{display:flex;gap:14px;padding:2px 15px 12px;flex-wrap:wrap}
+.callegend span{font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:5px}
+
 /* Progress */
 .pbar{height:7px;background:#E6EBEF;border-radius:4px;overflow:hidden;margin-top:7px}
 .pbar i{display:block;height:100%;background:var(--good);border-radius:4px}
@@ -311,6 +325,7 @@ const totalAssets=()=>Object.values(D.assets).reduce((s,v)=>s+(+v||0),0)+totalFu
 
 /* ---------- routing ---------- */
 let TAB='home', MOFF=0, POFF=0; // MOFF: viewed month offset (Spending); POFF: viewed pay-period offset (Bills)
+let COFF=0, CSEL=null;          // calendar month offset and selected day (iso)
 const viewMonth=()=>{ const t=today(); return new Date(t.getFullYear(),t.getMonth()+MOFF,1); };
 const mhead=()=>{ const d=viewMonth(); return `<div class="mhead">
   <button class="btn sm" data-act="mprev" aria-label="Previous month">&#8249;</button>
@@ -491,6 +506,8 @@ function viewBills(){
     <div>${items.map(billRow).join('')||'<div class="empty">Nothing due this pay period.</div>'}</div>
   </div>
 
+  ${calCard()}
+
   <div class="card">
     <h2>Recurring bills</h2>
     <p class="chelp">Normalized to ${money(norm)}/mo, plus ${money(mins)} in debt minimums.</p>
@@ -506,6 +523,49 @@ function viewBills(){
 }
 const WD=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const ord=n=>n+(['th','st','nd','rd'][(n%100>>3^1&&n%10)<4?n%10:0]||'th');
+
+function calCard(){
+  const t=today();
+  const m0=new Date(t.getFullYear(),t.getMonth()+COFF,1);
+  const me=new Date(m0.getFullYear(),m0.getMonth()+1,0);
+  const items=billsBetween(m0,me);
+  const byDay={}; items.forEach(i=>{ (byDay[iso(i.date)]=byDay[iso(i.date)]||[]).push(i); });
+  const pds=new Set(paydays(m0,me).map(iso));
+  const ti=iso(t);
+  let cells='';
+  for(let i=0;i<m0.getDay();i++) cells+='<span></span>';
+  for(let d=1;d<=me.getDate();d++){
+    const di=iso(new Date(m0.getFullYear(),m0.getMonth(),d));
+    const due=byDay[di]||[];
+    const dots=due.slice(0,3).map(i=>`<i style="background:${i.kind==='debt'?'#8E5C86':'#C6763B'}"></i>`).join('');
+    cells+=`<button class="cday ${pds.has(di)?'pay':''} ${di===ti?'tod':''} ${di===CSEL?'sel':''}"
+      data-cal="${di}" aria-label="${di}">${d}${dots?`<span class="dots">${dots}</span>`:''}</button>`;
+  }
+  const sel=CSEL&&CSEL.slice(0,7)===mkey(m0)?CSEL:null;
+  const selItems=sel?(byDay[sel]||[]):[];
+  return `
+  <div class="card">
+    <div class="mhead">
+      <button class="btn sm" data-act="calprev" aria-label="Previous month">&#8249;</button>
+      <h2>${m0.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</h2>
+      ${COFF?'<button class="btn sm" data-act="calnow">Today</button>':''}
+      <button class="btn sm" data-act="calnext" aria-label="Next month">&#8250;</button>
+    </div>
+    <div class="cal">
+      ${['S','M','T','W','T','F','S'].map(d=>`<span class="dow">${d}</span>`).join('')}
+      ${cells}
+    </div>
+    <div class="callegend">
+      <span><i class="dot" style="background:#D9EBE6;border:1px solid #9CC9BE"></i>Payday ${money(biweekly())}</span>
+      <span><i class="dot" style="background:#C6763B"></i>Bill due</span>
+      <span><i class="dot" style="background:#8E5C86"></i>Debt minimum</span>
+    </div>
+    ${sel?`<div style="border-top:1px solid var(--line)">
+      ${pds.has(sel)?`<div class="row"><div class="t"><b>Payday</b><small>Combined take-home</small></div><div class="amt num pos">+${money2(biweekly())}</div></div>`:''}
+      ${selItems.map(billRow).join('')||(pds.has(sel)?'':'<div class="empty">Nothing due '+fmtD(parseD(sel))+'.</div>')}
+    </div>`:''}
+  </div>`;
+}
 
 function viewSpend(){
   const vm=viewMonth(), m=mkey(vm);
@@ -853,12 +913,13 @@ function sheetSync(){
 
 /* ---------- actions ---------- */
 document.addEventListener('click',e=>{
-  const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close]');
+  const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close],[data-cal]');
   if(!el) { if(e.target.id==='sheet') closeSheet(); return; }
 
   if(el.dataset.close!==undefined||el.id==='sheet') return closeSheet();
   if(el.dataset.tab){ TAB=el.dataset.tab; render(); window.scrollTo(0,0); return; }
 
+  if(el.dataset.cal){ CSEL=CSEL===el.dataset.cal?null:el.dataset.cal; render(); return; }
   if(el.dataset.pay){
     const [d,bid]=el.dataset.pay.split('|');
     togglePaid({date:parseD(d),bill:{id:bid}}); render(); return;
@@ -917,6 +978,9 @@ document.addEventListener('click',e=>{
   else if(a==='pprev'){ POFF--; render(); }
   else if(a==='pnext'){ POFF++; render(); }
   else if(a==='pnow'){ POFF=0; render(); }
+  else if(a==='calprev'){ COFF--; CSEL=null; render(); }
+  else if(a==='calnext'){ COFF++; CSEL=null; render(); }
+  else if(a==='calnow'){ COFF=0; CSEL=null; render(); }
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
     csvRows().forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
