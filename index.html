@@ -242,13 +242,14 @@ function seed(){ return {
   smooth:true,
   pslf:{made:71,required:120},
   assets:{'Checking / Cash':0,'Retirement / Investments':0,'Home / Property':0,'Other':0},
-  paid:{}, txns:[],
+  paid:{}, txns:[], deleted:[],
   rules:[
     {m:'weis',c:'Groceries'},{m:'giant',c:'Groceries'},{m:'aldi',c:'Groceries'},{m:'wegmans',c:'Groceries'},
-    {m:'sheetz',c:'Gas'},{m:'turkey hill',c:'Gas'},{m:'sunoco',c:'Gas'},{m:'exxon',c:'Gas'},
+    {m:'sheetz',c:'Gas'},{m:'turkey hill',c:'Gas'},{m:'sunoco',c:'Gas'},{m:'exxon',c:'Gas'},{m:'wawa',c:'Gas'},
     {m:'dunkin',c:'Restaurants'},{m:'mcdonald',c:'Restaurants'},{m:'pizza',c:'Restaurants'},
-    {m:'netflix',c:'Entertainment'},{m:'spotify',c:'Entertainment'},{m:'amazon',c:'Household'},
-    {m:'walmart',c:'Household'},{m:'target',c:'Household'},{m:'lowes',c:'Household'}
+    {m:'netflix',c:'Entertainment'},{m:'spotify',c:'Entertainment'},{m:'apple.com',c:'Entertainment'},
+    {m:'amazon',c:'Household'},{m:'walmart',c:'Household'},{m:'wal-mart',c:'Household'},{m:'target',c:'Household'},
+    {m:'lowes',c:'Household'},{m:'dollar',c:'Household'},{m:'harbor freight',c:'Household'}
   ]
 };}
 
@@ -788,8 +789,9 @@ function viewSpend(){
         ${cats.map(c=>`<option ${x.category===c?'selected':''}>${esc(c)}</option>`).join('')}
       </select>
       <div class="amt num ${x.amount>0?'pos':''}">${money2(x.amount)}</div>
-    </div>`).join(''):'<div class="empty">No transactions yet. Add one by hand, or import a CSV from your bank.</div>'}
+    </div>`).join(''):'<div class="empty">No transactions yet. Add one by hand, or import a CSV or PDF from your bank.</div>'}
     </div>
+    ${tx.length?`<div class="cbody" style="padding-top:6px"><button class="btn sm danger" data-act="clear-month">Delete all ${tx.length} transactions in ${vm.toLocaleDateString('en-US',{month:'long'})}</button></div>`:''}
   </div>`;
 }
 
@@ -991,21 +993,43 @@ async function pdfLines(buf){
   if(!lines.length) throw new Error('no text found');
   return lines;
 }
-/* One transaction per line: a leading date, a description, and a trailing
-   amount (an optional final column is treated as the running balance). */
+/* One transaction per line: a leading date, a description, then amount and
+   (usually) a running balance. When a line carries several money values the
+   LAST is the balance and the one before it is the amount. Trailing-minus
+   statements (12.34-) carry explicit signs; otherwise deposit keywords
+   decide. Section headers like "CHECKING ID 40" tag the account, and
+   transfers between the household's own shares are skipped. */
 function txnsFromLines(lines){
   const ym=lines.join(' ').match(/20\d{2}/), fy=ym?+ym[0]:today().getFullYear();
-  const re=/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s+(.*?)\s+\(?\$?\s?(-?[\d,]+\.\d{2})\)?(?:\s+\$?\s?-?[\d,]+\.\d{2})?$/;
+  const MONEY=/\(?\$?\s?(-?)([\d,]+\.\d{2})(-?)\)?/g;
+  const explicit=lines.some(L=>/[\d,]+\.\d{2}-(\s|$)/.test(L));
+  const DATE=/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s+/;
+  let acct='';
   const out=[];
   lines.forEach(L=>{
-    const m=L.match(re); if(!m) return;
-    const y=m[3]?(+m[3]<100?2000+ +m[3]:+m[3]):fy;
-    const d=new Date(y,+m[1]-1,+m[2]); if(isNaN(d)) return;
-    let a=parseFloat(m[5].replace(/,/g,'')); if(isNaN(a)||!a) return;
-    const desc=m[4].trim(); if(!desc||/beginning|ending|balance/i.test(desc)) return;
-    if(/\(\s?\$?\s?[\d,]+\.\d{2}\s?\)/.test(L)) a=-Math.abs(a);
-    else if(a>0&&!/deposit|payroll|direct dep|credit|refund|interest|transfer in/i.test(desc)) a=-a;
-    out.push({id:uid(),date:iso(d),desc:desc.slice(0,60),amount:a,category:catFor(desc)});
+    const ah=L.match(/^([A-Za-z][\w .&'-]{2,30}?)\s+ID\s+\d+\b/);
+    if(ah){ acct=ah[1].trim(); return; }
+    const dm=L.match(DATE); if(!dm) return;
+    if(/beginning balance|ending balance|total (deposits|withdrawals)|year-to-date/i.test(L)) return;
+    const toks=[...L.matchAll(MONEY)]; if(!toks.length) return;
+    const tk=toks.length>=2?toks[toks.length-2]:toks[0];
+    let a=parseFloat(tk[2].replace(/,/g,'')); if(!a||isNaN(a)) return;
+    const neg=tk[1]==='-'||tk[3]==='-'||tk[0].trim().startsWith('(');
+    let desc=L.slice(dm[0].length,tk.index).trim();
+    if(/transfer (to|from) (share|shr)/i.test(desc)) return;
+    desc=desc.replace(/^((recurring )?withdrawal|deposit|ach (debit|credit)?|pos)\b[: ]*/i,'')
+      .replace(/debit card .*?post: ?\d{1,2}\/\d{1,2}/i,'')
+      .replace(/pos #\d+/i,'')
+      .replace(/eff\. ?date \d{1,2}\/\d{1,2}.*/i,'')
+      .replace(/\b\d{6,}\b/g,'')
+      .replace(/\s+\d(?=\s|$)/g,'')
+      .replace(/\s+/g,' ').trim();
+    if(!desc) desc='(no description)';
+    if(neg) a=-Math.abs(a);
+    else if(!explicit&&!/deposit|payroll|direct dep|credit|refund|interest/i.test(L)) a=-a;
+    const y=dm[3]?(+dm[3]<100?2000+ +dm[3]:+dm[3]):fy;
+    const d=new Date(y,+dm[1]-1,+dm[2]); if(isNaN(d)) return;
+    out.push({id:uid(),date:iso(d),desc:desc.slice(0,60),amount:a,category:catFor(desc),account:acct||undefined});
   });
   return out;
 }
@@ -1013,12 +1037,16 @@ function pdfPreview(){
   const rows=PDFROWS||[];
   if(!rows.length){ document.getElementById('csv-map').innerHTML='<p class="note" style="color:var(--alert)">No transaction lines recognized in that statement. Send a page of it to Claude and the reader can be tuned &mdash; or use the CSV export.</p>'; return; }
   const dupes=rows.filter(r=>D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)).length;
+  const accts=[...new Set(rows.map(r=>r.account||'Statement'))];
+  const sum=l=>l.reduce((s,x)=>s+(x.amount<0?-x.amount:0),0);
   document.getElementById('csv-map').innerHTML=`
-    <p class="note">${rows.length} transactions recognized. ${dupes?dupes+' look like duplicates and will be skipped. ':''}Check the signs below &mdash; deposits should be green.</p>
-    <table class="prev"><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
+    <p class="note">${rows.length} transactions recognized${dupes?`, ${dupes} duplicates will be skipped`:''}. Internal transfers between your own accounts were left out. Untick any account that is not household spending.</p>
+    ${accts.map(a=>{const l=rows.filter(r=>(r.account||'Statement')===a);
+      return `<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin:5px 2px"><input type="checkbox" class="pdf-acct" value="${esc(a)}" checked> <b>${esc(a)}</b>&nbsp;&middot; ${l.length} txns &middot; ${money(sum(l))} out</label>`;}).join('')}
+    <table class="prev" style="margin-top:8px"><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
     ${rows.slice(0,14).map(r=>`<tr><td class="num">${esc(r.date.slice(5))}</td><td>${esc(r.desc.slice(0,26))}</td><td>${r.category?esc(r.category):'&mdash;'}</td><td class="num ${r.amount>0?'pos':''}" style="text-align:right">${money2(r.amount)}</td></tr>`).join('')}
     </tbody></table>
-    <button class="btn pri wide" data-act="pdf-import" style="margin-top:12px">Import ${rows.length-dupes} transactions</button>`;
+    <button class="btn pri wide" data-act="pdf-import" style="margin-top:12px">Import selected accounts</button>`;
 }
 function parseCSV(text){
   const rows=[]; let row=[],cell='',q=false;
@@ -1111,6 +1139,10 @@ function mergeDocs(a,b){
   const has=t=>m.txns.some(x=>x.id===t.id||(x.date===t.date&&x.amount===t.amount&&x.desc===t.desc));
   (other.txns||[]).forEach(t=>{ if(!has(t)) m.txns.push(t); });
   Object.entries(other.paid||{}).forEach(([mo,ks])=>{ m.paid[mo]=[...new Set([...(m.paid[mo]||[]),...ks])]; });
+  // deletions win over the union, so removing a transaction sticks across devices
+  const del=new Set([...(m.deleted||[]),...(other.deleted||[])]);
+  m.deleted=[...del].slice(-800);
+  m.txns=m.txns.filter(t=>!del.has(t.id));
   return m;
 }
 
@@ -1292,11 +1324,26 @@ document.addEventListener('click',e=>{
     save(); closeSheet(); render();
   }
   else if(a==='td-del'){
-    if(confirm('Delete this transaction?')){ D.txns=D.txns.filter(t=>t.id!==v('td-id')); save(); closeSheet(); render(); }
+    if(confirm('Delete this transaction?')){
+      D.deleted=(D.deleted||[]).concat(v('td-id')).slice(-800);
+      D.txns=D.txns.filter(t=>t.id!==v('td-id')); save(); closeSheet(); render();
+    }
   }
   else if(a==='pdf-import'){
-    (PDFROWS||[]).forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
+    const on=new Set([...document.querySelectorAll('.pdf-acct:checked')].map(i=>i.value));
+    (PDFROWS||[]).filter(r=>on.has(r.account||'Statement')).forEach(r=>{
+      if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r);
+    });
     PDFROWS=null; save(); closeSheet(); TAB='spend'; render();
+  }
+  else if(a==='clear-month'){
+    const m=mkey(viewMonth());
+    const doomed=D.txns.filter(x=>x.date.slice(0,7)===m);
+    if(doomed.length&&confirm(`Delete all ${doomed.length} transactions in this month? Bills and paid checkmarks are not affected.`)){
+      D.deleted=(D.deleted||[]).concat(doomed.map(x=>x.id)).slice(-800);
+      D.txns=D.txns.filter(x=>x.date.slice(0,7)!==m);
+      save(); render();
+    }
   }
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
