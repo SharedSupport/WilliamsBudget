@@ -299,8 +299,9 @@ const save=(queue=true)=>{
 const CATS=['Groceries','Gas','Restaurants','Entertainment','Household','Automotive','Personal','Other'];
 /* Money coming in: 'Paycheck' is covered by the payday schedule (never
    double-counted); 'Income' is extra — bonuses, side money — and adds to
-   the month's income totals. */
-const ALLCATS=[...CATS,'Income','Paycheck'];
+   the month's income totals. 'Bills' marks the bank-side payment of a
+   tracked bill, so it never counts as variable spending. */
+const ALLCATS=[...CATS,'Bills','Income','Paycheck'];
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:Math.abs(n)>=1000?0:2}).format(n||0);
 const money2=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n||0);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -524,7 +525,7 @@ function spendMonths(n){
   for(let i=n-1;i>=0;i--){
     const d=new Date(t.getFullYear(),t.getMonth()-i,1),k=mkey(d);
     out.push({label:d.toLocaleDateString('en-US',{month:'short'}),
-      amt:D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount<0).reduce((s,x)=>s+(-x.amount),0)});
+      amt:D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount<0&&x.category!=='Bills').reduce((s,x)=>s+(-x.amount),0)});
   }
   return out;
 }
@@ -574,7 +575,7 @@ function viewHome(){
   const upcoming=cur.items.filter(i=>!isPaid(i)).slice(0,8);
   const mIncome=biweekly()*26/12;
   const nw=totalAssets()-totalDebt();
-  const spend=D.txns.filter(x=>x.date.slice(0,7)===mkey(t)&&x.amount<0).reduce((s,x)=>s+(-x.amount),0);
+  const spend=D.txns.filter(x=>x.date.slice(0,7)===mkey(t)&&x.amount<0&&x.category!=='Bills').reduce((s,x)=>s+(-x.amount),0);
 
   return `
   <div class="grid2" style="margin-bottom:12px">
@@ -757,7 +758,7 @@ function incomeExpenseMonths(n){
       inc:paydays(d,me).length*pay
          +D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount>0&&x.category==='Income').reduce((s,x)=>s+x.amount,0),
       exp:billsBetween(d,me).reduce((s,x)=>s+x.amount,0)
-         +D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount<0).reduce((s,x)=>s+(-x.amount),0)});
+         +D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount<0&&x.category!=='Bills').reduce((s,x)=>s+(-x.amount),0)});
   }
   return out;
 }
@@ -778,7 +779,7 @@ function svgIncExp(data){
 function viewSpend(){
   const vm=viewMonth(), m=mkey(vm);
   const tx=D.txns.filter(x=>x.date.slice(0,7)===m).sort((a,b)=>b.date.localeCompare(a.date));
-  const by={}; tx.filter(x=>x.amount<0).forEach(x=>by[x.category||'Other']=(by[x.category||'Other']||0)+(-x.amount));
+  const by={}; tx.filter(x=>x.amount<0&&x.category!=='Bills').forEach(x=>by[x.category||'Other']=(by[x.category||'Other']||0)+(-x.amount));
   const cats=[...new Set([...ALLCATS,...Object.keys(by)])];
   const unc=tx.filter(x=>!x.category).length;
   const ie=incomeExpenseMonths(6), cur=ie[ie.length-1], net=cur.inc-cur.exp;
@@ -1150,6 +1151,24 @@ function merchKey(desc){
 function autoCategorize(){
   let n=0;
   D.txns.forEach(x=>{ if(!x.category){ const c=catFor(x.desc); if(c){x.category=c;n++;} } });
+  return n+matchBillTxns();
+}
+/* Reconcile imports against tracked bills: a withdrawal matching a bill's
+   amount (within 1%, at least 50 cents) due within a week files as 'Bills'
+   and checks the bill off. */
+function matchBillTxns(){
+  const used=new Set(); let n=0;
+  D.txns.filter(x=>x.amount<0&&!x.category).forEach(x=>{
+    const d=parseD(x.date), from=new Date(d), to=new Date(d);
+    from.setDate(from.getDate()-7); to.setDate(to.getDate()+7);
+    const hit=billsBetween(from,to).find(it=>
+      !used.has(paidKey(it))&&Math.abs(Math.abs(x.amount)-it.amount)<=Math.max(.5,it.amount*.01));
+    if(hit){
+      used.add(paidKey(hit));
+      x.category='Bills'; n++;
+      if(!isPaid(hit)) togglePaid(hit);
+    }
+  });
   return n;
 }
 function csvRows(){
@@ -1407,7 +1426,7 @@ document.addEventListener('click',e=>{
     (PDFROWS||[]).filter(r=>on.has(r.account||'Statement')).forEach(r=>{
       if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r);
     });
-    PDFROWS=null; save(); closeSheet(); TAB='spend'; render();
+    PDFROWS=null; matchBillTxns(); save(); closeSheet(); TAB='spend'; render();
   }
   else if(a==='autocat'){ autoCategorize(); save(); render(); }
   else if(a==='clear-month'){
@@ -1422,7 +1441,7 @@ document.addEventListener('click',e=>{
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
     csvRows().forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
-    save(); closeSheet(); TAB='spend'; render();
+    matchBillTxns(); save(); closeSheet(); TAB='spend'; render();
   }
   else if(a==='export'){
     const blob=new Blob([JSON.stringify(D,null,2)],{type:'application/json'});
