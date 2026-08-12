@@ -225,7 +225,10 @@ function seed(){ return {
 
 let D = (()=>{ const r=store.get(KEY); if(!r) return seed();
   try{ const p=JSON.parse(r); return Object.assign(seed(),p); }catch(e){ return seed(); } })();
-const save=()=>store.set(KEY,JSON.stringify(D));
+const save=(queue=true)=>{
+  D.updatedAt=Date.now(); store.set(KEY,JSON.stringify(D));
+  if(queue&&SYNC&&SYNC.token){ clearTimeout(syncTimer); syncTimer=setTimeout(syncNow,2500); }
+};
 
 /* ---------- helpers ---------- */
 const CATS=['Groceries','Gas','Restaurants','Entertainment','Household','Personal','Other'];
@@ -431,8 +434,11 @@ function viewHome(){
   <div class="card">
     <h2>Your data</h2>
     <div class="cbody">
-      <p class="note" style="margin-top:0">Everything lives on this device only. Nothing is sent anywhere. Export a backup file to move it to another phone.</p>
+      <p class="note" style="margin-top:0">${SYNC?`Synced through <b>${esc(SYNC.repo)}</b> so both phones see the same budget.`:'Everything lives on this device only. Nothing is sent anywhere unless you turn on sync.'}</p>
+      <p class="note" id="sync-status">${syncStatusText()}</p>
       <div class="btnrow" style="margin-top:10px">
+        ${SYNC?'<button class="btn sm pri" data-act="sync-now">Sync now</button>':''}
+        <button class="btn sm" data-sheet="sync">${SYNC?'Sync settings':'Set up sync'}</button>
         <button class="btn sm" data-act="export">Export backup</button>
         <button class="btn sm" data-act="import-json">Restore backup</button>
         <button class="btn sm danger" data-act="reset">Start over</button>
@@ -739,6 +745,81 @@ function csvPreview(){
     <button class="btn pri wide" data-act="csv-import" style="margin-top:12px">Import ${rows.length-dupes} transactions</button>`;
 }
 
+/* ---------- GitHub sync ----------
+   Both devices read/write one ledger.json in a PRIVATE repo through the
+   GitHub contents API. The token is a fine-grained PAT limited to that
+   repo, stored only in this device's localStorage. */
+const SYNCKEY='ledger.sync';
+let SYNC=(()=>{ try{ return JSON.parse(store.get(SYNCKEY))||null }catch(e){ return null } })();
+let syncTimer=null;
+const syncState={busy:false,again:false,last:store.get('ledger.synced')||'',err:''};
+
+const b64e=s=>{ const u=new TextEncoder().encode(s); let b='';
+  for(let i=0;i<u.length;i+=8192) b+=String.fromCharCode(...u.subarray(i,i+8192)); return btoa(b); };
+const b64d=s=>{ const b=atob(s.replace(/\s/g,'')); const u=new Uint8Array(b.length);
+  for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return new TextDecoder().decode(u); };
+const ghURL=()=>`https://api.github.com/repos/${SYNC.repo}/contents/${SYNC.path||'ledger.json'}`;
+const ghHdrs=()=>({Authorization:'Bearer '+SYNC.token,Accept:'application/vnd.github+json'});
+
+function syncStatusText(){
+  if(!SYNC) return 'Turn on sync to share one budget across your phones.';
+  if(syncState.busy) return 'Syncing…';
+  if(syncState.err) return 'Sync problem: '+syncState.err;
+  return syncState.last?'Last synced '+syncState.last:'Not synced yet.';
+}
+function paintSync(){ const el=document.getElementById('sync-status'); if(el) el.textContent=syncStatusText(); }
+
+/* Newer document wins field-by-field; transactions and paid marks are
+   merged as unions so edits from both phones survive. */
+function mergeDocs(a,b){
+  if(!a) return b; if(!b) return a;
+  const [base,other]=(+a.updatedAt||0)>=(+b.updatedAt||0)?[a,b]:[b,a];
+  const m=JSON.parse(JSON.stringify(base));
+  m.txns=m.txns||[]; m.paid=m.paid||{};
+  const has=t=>m.txns.some(x=>x.id===t.id||(x.date===t.date&&x.amount===t.amount&&x.desc===t.desc));
+  (other.txns||[]).forEach(t=>{ if(!has(t)) m.txns.push(t); });
+  Object.entries(other.paid||{}).forEach(([mo,ks])=>{ m.paid[mo]=[...new Set([...(m.paid[mo]||[]),...ks])]; });
+  return m;
+}
+
+async function syncNow(){
+  if(!SYNC||!SYNC.token) return;
+  if(syncState.busy){ syncState.again=true; return; }
+  syncState.busy=true; syncState.err=''; paintSync();
+  try{
+    const r=await fetch(ghURL(),{headers:ghHdrs()});
+    let sha=null, remote=null;
+    if(r.status===200){ const j=await r.json(); sha=j.sha; remote=JSON.parse(b64d(j.content)); }
+    else if(r.status!==404) throw new Error(r.status===401?'token rejected':r.status===403?'no access to repo':'GitHub said '+r.status);
+    D=Object.assign(seed(),mergeDocs(D,remote)); save(false);
+    const body=JSON.stringify(D,null,1);
+    if(!remote||JSON.stringify(Object.assign(seed(),remote),null,1)!==body){
+      const w=await fetch(ghURL(),{method:'PUT',headers:ghHdrs(),
+        body:JSON.stringify({message:'ledger sync',content:b64e(body),sha:sha||undefined})});
+      if(!w.ok) throw new Error(w.status===409?'edited elsewhere, try again':'save failed ('+w.status+')');
+    }
+    syncState.last=new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    store.set('ledger.synced',syncState.last);
+    render();
+  }catch(e){ syncState.err=e.message==='Failed to fetch'?'offline or blocked':e.message; }
+  syncState.busy=false; paintSync();
+  if(syncState.again){ syncState.again=false; syncNow(); }
+}
+
+function sheetSync(){
+  const s=SYNC||{repo:'',token:''};
+  openSheet(shell('Sync through GitHub',`<div class="card"><div class="cbody">
+    <p class="note" style="margin-top:0">Both phones read and write one file in a <b>private</b> GitHub repo, so you both see the same budget. One-time setup:</p>
+    <p class="note">1. On github.com, create a new <b>private</b> repository, e.g. <b>ledger-data</b>. Private matters: this file will hold your real numbers.</p>
+    <p class="note">2. Make a token: GitHub Settings &rarr; Developer settings &rarr; Fine-grained tokens &rarr; Generate. Under Repository access pick <b>only that repo</b>, and under Permissions set <b>Contents: Read and write</b>.</p>
+    <p class="note">3. Enter both below, on each phone.</p>
+    <label class="f"><span>Repo (owner/name)</span><input id="sy-repo" value="${esc(s.repo)}" placeholder="SharedSupport/ledger-data" autocapitalize="off"></label>
+    <label class="f"><span>Token</span><input id="sy-token" type="password" value="${esc(s.token)}" placeholder="github_pat_&hellip;" autocomplete="off"></label>
+    <div class="btnrow"><button class="btn pri" data-act="sync-save">Save &amp; sync</button>
+    ${SYNC?'<button class="btn danger" data-act="sync-off">Turn off sync</button>':''}</div>
+  </div></div>`));
+}
+
 /* ---------- actions ---------- */
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close]');
@@ -755,7 +836,7 @@ document.addEventListener('click',e=>{
   if(el.dataset.editDebt){ return sheetDebt(D.debts.find(b=>b.id===el.dataset.editDebt)); }
   if(el.dataset.fund){ return sheetAddToFund(D.funds.find(f=>f.id===el.dataset.fund)); }
   if(el.dataset.sheet){
-    return {txn:sheetTxn,budgets:sheetBudgets,bill:()=>sheetBill(),fund:()=>sheetFund(),import:sheetImport}[el.dataset.sheet]();
+    return {txn:sheetTxn,budgets:sheetBudgets,bill:()=>sheetBill(),fund:()=>sheetFund(),import:sheetImport,sync:sheetSync}[el.dataset.sheet]();
   }
 
   const a=el.dataset.act, g=id=>document.getElementById(id), v=id=>g(id).value.trim();
@@ -790,6 +871,15 @@ document.addEventListener('click',e=>{
     f.balance=(+f.balance||0)+amt; save(); closeSheet(); render();
   }
   else if(a==='pslf'){ D.pslf.made=Math.min(D.pslf.required,D.pslf.made+1); save(); render(); }
+  else if(a==='sync-save'){
+    const repo=v('sy-repo').replace(/^https?:\/\/github\.com\//,'').replace(/\/+$/,''), token=v('sy-token');
+    if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return g('sy-repo').focus();
+    if(!token) return g('sy-token').focus();
+    SYNC={repo,path:'ledger.json',token}; store.set(SYNCKEY,JSON.stringify(SYNC));
+    closeSheet(); render(); syncNow();
+  }
+  else if(a==='sync-off'){ SYNC=null; store.set(SYNCKEY,''); clearTimeout(syncTimer); closeSheet(); render(); }
+  else if(a==='sync-now'){ syncNow(); }
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
     csvRows().forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
@@ -834,6 +924,7 @@ function render(){
     ({home:viewHome,bills:viewBills,spend:viewSpend,debt:viewDebt,goals:viewGoals}[TAB])();
 }
 render();
+if(SYNC&&SYNC.token) syncNow();
 
 /* ---------- PIN lock ----------
    Keeps casual visitors out of the app screen. It is NOT encryption:

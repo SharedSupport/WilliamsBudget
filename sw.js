@@ -1,5 +1,5 @@
 /* Offline shell. Bump CACHE when you change any file. */
-const CACHE = 'ledger-v2';
+const CACHE = 'ledger-v3';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -16,6 +16,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // never cache cross-origin requests (e.g. the GitHub sync API)
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(e.request)
       .then(r => {

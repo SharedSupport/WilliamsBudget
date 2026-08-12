@@ -23,11 +23,17 @@ It then runs full screen, launches from the home screen, and works offline.
 
 ## Two phones, one budget
 
-Each phone keeps its own copy. There's no server syncing them, which is what keeps this private and free. To move data across:
+Built-in sync through a **private** GitHub repo: both phones read and write one `ledger.json` file via the GitHub API, so a change on one phone shows up on the other. Setup (once):
 
-**Today → Your data → Export backup** writes a JSON file. Drop it in your shared OneDrive folder, open it on the other phone, and use **Restore backup**.
+1. Create a new **private** repository on github.com, e.g. `ledger-data`. Private matters — this file holds your real numbers, unlike the app shell in this repo.
+2. Make a fine-grained token: GitHub Settings → Developer settings → Fine-grained tokens → Generate new token. Repository access: **only** `ledger-data`. Permissions: **Contents → Read and write**. (Fine-grained tokens expire — a year max — so calendar a renewal.)
+3. On each phone: **Today → Your data → Set up sync**, paste the repo name and token.
 
-Fine for a monthly reconcile. If you want live two-way sync, that needs a backend, and the private hosting options below are where to start.
+The app pulls on launch and pushes a couple of seconds after every change; **Sync now** forces a round-trip. Transactions and paid-off checkmarks from both phones are merged, other edits use newest-wins. The commit history of `ledger-data` doubles as an audit log of every change.
+
+The token is stored in localStorage on each phone. If a phone is lost, revoke that token in GitHub settings — it can only ever touch the one data repo.
+
+Manual fallback still works: **Export backup** / **Restore backup** moves a JSON file by hand.
 
 ## Private hosting
 
