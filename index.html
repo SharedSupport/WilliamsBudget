@@ -782,7 +782,7 @@ function viewSpend(){
     <h2>Transactions</h2>
     <div style="margin-top:10px">
     ${tx.length?tx.slice(0,80).map(x=>`<div class="row">
-      <div class="t"><b>${esc(x.desc||'(no description)')}</b><small>${fmtD(parseD(x.date))}${x.account?' &middot; '+esc(x.account):''}</small></div>
+      <div class="t" data-txn="${x.id}" style="cursor:pointer"><b>${esc(x.desc||'(no description)')}</b><small>${fmtD(parseD(x.date))}${x.account?' &middot; '+esc(x.account):''}${x.notes?' &middot; &#128221;':''}</small></div>
       <select data-cat="${x.id}" style="width:auto;padding:5px 7px;font-size:12px;border-radius:7px">
         <option value="">Pick one</option>
         ${cats.map(c=>`<option ${x.category===c?'selected':''}>${esc(c)}</option>`).join('')}
@@ -949,16 +949,76 @@ function sheetAddToFund(f){
 let CSV=null;
 function sheetImport(){
   openSheet(shell('Import from your bank',`<div class="card"><div class="cbody">
-    <p class="note" style="margin-top:0">Download a CSV of transactions from your bank's website, then pick the file here. It is read on this device only.</p>
-    <label class="f" style="margin-top:12px"><span>CSV file</span><input type="file" id="csv-file" accept=".csv,text/csv"></label>
+    <p class="note" style="margin-top:0">Pick a transaction CSV or a PDF statement from your bank. Either way it is read on this device only &mdash; nothing is uploaded.</p>
+    <label class="f" style="margin-top:12px"><span>CSV or PDF file</span><input type="file" id="csv-file" accept=".csv,text/csv,.pdf,application/pdf"></label>
     <div id="csv-map"></div>
   </div></div>`));
   document.getElementById('csv-file').addEventListener('change',e=>{
     const f=e.target.files[0]; if(!f) return;
+    const out=document.getElementById('csv-map');
+    if(/\.pdf$/i.test(f.name)||f.type==='application/pdf'){
+      out.innerHTML='<p class="note">Reading the statement&hellip;</p>';
+      const r=new FileReader();
+      r.onload=async()=>{ try{
+          PDFROWS=txnsFromLines(await pdfLines(r.result));
+          pdfPreview();
+        }catch(err){ out.innerHTML=`<p class="note" style="color:var(--alert)">Could not read that PDF (${esc(err.message)}). If it is a scanned image statement, try the CSV export instead.</p>`; } };
+      r.readAsArrayBuffer(f);
+      return;
+    }
     const r=new FileReader();
-    r.onload=()=>{ try{ CSV=parseCSV(r.result); mapUI(); }catch(err){ document.getElementById('csv-map').innerHTML=`<p class="note" style="color:var(--alert)">That file could not be read as CSV. Try exporting again as "comma separated values".</p>`; } };
+    r.onload=()=>{ try{ CSV=parseCSV(r.result); mapUI(); }catch(err){ out.innerHTML=`<p class="note" style="color:var(--alert)">That file could not be read as CSV. Try exporting again as "comma separated values".</p>`; } };
     r.readAsText(f);
   });
+}
+
+/* ---------- PDF statement import ---------- */
+let PDFROWS=null;
+async function pdfLines(buf){
+  const pdfjs=await import('./vendor/pdf.min.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.mjs';
+  const doc=await pdfjs.getDocument({data:buf}).promise;
+  const lines=[];
+  for(let p=1;p<=doc.numPages;p++){
+    const tc=await (await doc.getPage(p)).getTextContent();
+    const rows={};
+    tc.items.forEach(it=>{ if(!it.str.trim()) return;
+      const y=Math.round(it.transform[5]/3)*3; (rows[y]=rows[y]||[]).push(it); });
+    Object.keys(rows).map(Number).sort((a,b)=>b-a).forEach(y=>{
+      lines.push(rows[y].sort((a,b)=>a.transform[4]-b.transform[4]).map(i=>i.str).join(' ').replace(/\s+/g,' ').trim());
+    });
+  }
+  if(!lines.length) throw new Error('no text found');
+  return lines;
+}
+/* One transaction per line: a leading date, a description, and a trailing
+   amount (an optional final column is treated as the running balance). */
+function txnsFromLines(lines){
+  const ym=lines.join(' ').match(/20\d{2}/), fy=ym?+ym[0]:today().getFullYear();
+  const re=/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s+(.*?)\s+\(?\$?\s?(-?[\d,]+\.\d{2})\)?(?:\s+\$?\s?-?[\d,]+\.\d{2})?$/;
+  const out=[];
+  lines.forEach(L=>{
+    const m=L.match(re); if(!m) return;
+    const y=m[3]?(+m[3]<100?2000+ +m[3]:+m[3]):fy;
+    const d=new Date(y,+m[1]-1,+m[2]); if(isNaN(d)) return;
+    let a=parseFloat(m[5].replace(/,/g,'')); if(isNaN(a)||!a) return;
+    const desc=m[4].trim(); if(!desc||/beginning|ending|balance/i.test(desc)) return;
+    if(/\(\s?\$?\s?[\d,]+\.\d{2}\s?\)/.test(L)) a=-Math.abs(a);
+    else if(a>0&&!/deposit|payroll|direct dep|credit|refund|interest|transfer in/i.test(desc)) a=-a;
+    out.push({id:uid(),date:iso(d),desc:desc.slice(0,60),amount:a,category:catFor(desc)});
+  });
+  return out;
+}
+function pdfPreview(){
+  const rows=PDFROWS||[];
+  if(!rows.length){ document.getElementById('csv-map').innerHTML='<p class="note" style="color:var(--alert)">No transaction lines recognized in that statement. Send a page of it to Claude and the reader can be tuned &mdash; or use the CSV export.</p>'; return; }
+  const dupes=rows.filter(r=>D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)).length;
+  document.getElementById('csv-map').innerHTML=`
+    <p class="note">${rows.length} transactions recognized. ${dupes?dupes+' look like duplicates and will be skipped. ':''}Check the signs below &mdash; deposits should be green.</p>
+    <table class="prev"><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
+    ${rows.slice(0,14).map(r=>`<tr><td class="num">${esc(r.date.slice(5))}</td><td>${esc(r.desc.slice(0,26))}</td><td>${r.category?esc(r.category):'&mdash;'}</td><td class="num ${r.amount>0?'pos':''}" style="text-align:right">${money2(r.amount)}</td></tr>`).join('')}
+    </tbody></table>
+    <button class="btn pri wide" data-act="pdf-import" style="margin-top:12px">Import ${rows.length-dupes} transactions</button>`;
 }
 function parseCSV(text){
   const rows=[]; let row=[],cell='',q=false;
@@ -1078,6 +1138,24 @@ async function syncNow(){
   if(syncState.again){ syncState.again=false; syncNow(); }
 }
 
+function sheetTxnDetail(id){
+  const x=D.txns.find(t=>t.id===id); if(!x) return;
+  const cats=[...new Set([...CATS,...(x.category?[x.category]:[])])];
+  openSheet(shell('Transaction',`<div class="card"><div class="cbody">
+    <input type="hidden" id="td-id" value="${esc(x.id)}">
+    <label class="f"><span>Description</span><input id="td-desc" value="${esc(x.desc||'')}"></label>
+    <div class="f2">
+      <label class="f"><span>Amount (negative = spent)</span><input id="td-amt" type="number" step="0.01" inputmode="decimal" value="${x.amount}"></label>
+      <label class="f"><span>Date</span><input id="td-date" type="date" value="${esc(x.date)}"></label>
+    </div>
+    <label class="f"><span>Category</span><select id="td-cat"><option value="">None</option>${cats.map(c=>`<option ${x.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+    <label class="f"><span>Notes</span><textarea id="td-notes" rows="2" placeholder="Anything worth remembering about this one">${esc(x.notes||'')}</textarea></label>
+    ${x.account?`<p class="note" style="margin-top:0">Account: ${esc(x.account)}</p>`:''}
+    <div class="btnrow"><button class="btn pri" data-act="td-save">Save</button>
+    <button class="btn danger" data-act="td-del">Delete transaction</button></div>
+  </div></div>`));
+}
+
 function sheetSettings(){
   openSheet(shell('Settings',`
     <div class="card">
@@ -1130,7 +1208,7 @@ function sheetSync(){
 
 /* ---------- actions ---------- */
 document.addEventListener('click',e=>{
-  const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close],[data-cal],[data-goto]');
+  const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close],[data-cal],[data-goto],[data-txn]');
   if(!el) { if(e.target.id==='sheet') closeSheet(); return; }
 
   if(el.dataset.close!==undefined||el.id==='sheet') return closeSheet();
@@ -1138,6 +1216,7 @@ document.addEventListener('click',e=>{
 
   if(el.dataset.cal){ CSEL=CSEL===el.dataset.cal?null:el.dataset.cal; render(); return; }
   if(el.dataset.goto!==undefined){ POFF=+el.dataset.goto; TAB='bills'; render(); window.scrollTo(0,0); return; }
+  if(el.dataset.txn){ return sheetTxnDetail(el.dataset.txn); }
   if(el.dataset.pay){
     const [d,bid]=el.dataset.pay.split('|');
     togglePaid({date:parseD(d),bill:{id:bid}}); render(); return;
@@ -1205,6 +1284,20 @@ document.addEventListener('click',e=>{
   else if(a==='calprev'){ COFF--; CSEL=null; render(); }
   else if(a==='calnext'){ COFF++; CSEL=null; render(); }
   else if(a==='calnow'){ COFF=0; CSEL=null; render(); }
+  else if(a==='td-save'){
+    const x=D.txns.find(t=>t.id===v('td-id')); if(!x) return closeSheet();
+    const amt=parseFloat(v('td-amt')); if(isNaN(amt)) return g('td-amt').focus();
+    x.desc=v('td-desc'); x.amount=amt; x.date=v('td-date')||x.date;
+    x.category=v('td-cat'); x.notes=v('td-notes');
+    save(); closeSheet(); render();
+  }
+  else if(a==='td-del'){
+    if(confirm('Delete this transaction?')){ D.txns=D.txns.filter(t=>t.id!==v('td-id')); save(); closeSheet(); render(); }
+  }
+  else if(a==='pdf-import'){
+    (PDFROWS||[]).forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
+    PDFROWS=null; save(); closeSheet(); TAB='spend'; render();
+  }
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
     csvRows().forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
