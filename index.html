@@ -49,6 +49,13 @@ header .eyebrow{color:#7EA0B4}
 .hbig{font-size:31px;font-weight:600;margin:2px 0 0;letter-spacing:-.02em}
 .hsub{font-size:12.5px;color:#9DB6C6;margin-top:3px}
 .pill{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:5px 11px;font-size:12px;color:#CFE0EA;white-space:nowrap}
+.hgear{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-radius:999px;width:30px;height:30px;display:grid;place-items:center;color:#CFE0EA;cursor:pointer;padding:0}
+.hgear svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
+.hright{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.statusbar{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:2px;background:none;margin-top:8px}
+.statusbar i{display:block;height:100%;border-radius:3px}
+.statkey{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.statkey span{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:5px}
 
 /* Runway: the signature element */
 .runway{margin-top:18px}
@@ -412,7 +419,10 @@ function renderHeader(){
         <div class="hbig num">${money(remaining)}</div>
         <div class="hsub">${items.filter(i=>!isPaid(i)).length} of ${items.length} bills still open &middot; through ${fmtD(winEnd)}</div>
       </div>
-      <div class="pill">${dtp===0?'Payday today':dtp===1?'Payday tomorrow':dtp+' days to payday'}</div>
+      <div class="hright">
+        <div class="pill">${dtp===0?'Payday today':dtp===1?'Payday tomorrow':dtp+' days to payday'}</div>
+        <button class="hgear" data-sheet="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.7M12 18.5v2.7M2.8 12h2.7M18.5 12h2.7M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M18.5 5.5l-1.9 1.9M7.4 16.6l-1.9 1.9"/></svg></button>
+      </div>
     </div>
     <div class="runway">
       <div class="rbar" role="img" aria-label="Paycheck allocation">
@@ -447,6 +457,73 @@ function billRow(it){
     </div></div>`;
 }
 
+/* ---------- dashboard charts (inline SVG, app palette) ---------- */
+const MONO='IBM Plex Mono,monospace';
+function svgChecks(){
+  const plan=buildPlan(8), pay=biweekly();
+  const tots=plan.map(p=>p.items.reduce((s,x)=>s+x.amount,0));
+  const W=352,CB=112,H=132,n=plan.length,bw=W/n;
+  const max=Math.max(pay,...tots)*1.12;
+  const y=v=>CB-(v/max)*(CB-14);
+  const py=y(pay);
+  let s=`<line x1="0" y1="${py}" x2="${W}" y2="${py}" stroke="#8AA5B5" stroke-width="1" stroke-dasharray="3 3"/>`
+       +`<text x="${W-2}" y="${py-4}" text-anchor="end" font-size="8.5" fill="var(--muted)" font-family="${MONO}">pay ${money(pay)}</text>`;
+  plan.forEach((p,i)=>{
+    const t=tots[i],bx=i*bw+5,w=bw-10,by=y(t),over=t>pay;
+    s+=`<rect x="${bx}" y="${by}" width="${w}" height="${Math.max(3,CB-by)}" rx="4" fill="${over?'var(--alert)':'#3E8F82'}" data-goto="${i}" style="cursor:pointer"><title>${fmtD(p.start)}: ${money2(t)} in bills, ${money2(pay-t)} ${t>pay?'short':'left'}</title></rect>`;
+    s+=`<text x="${bx+w/2}" y="${CB+13}" text-anchor="middle" font-size="8.5" fill="var(--muted)" font-family="${MONO}">${p.start.getMonth()+1}/${p.start.getDate()}</text>`;
+  });
+  const hi=tots.indexOf(Math.max(...tots)), lo=tots.indexOf(Math.min(...tots));
+  [...new Set([hi,lo])].forEach(i=>{
+    s+=`<text x="${i*bw+bw/2}" y="${y(tots[i])-4}" text-anchor="middle" font-size="8.5" fill="var(--ink)" font-family="${MONO}">${money(tots[i])}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Bills per upcoming paycheck">${s}</svg>`;
+}
+function spendMonths(n){
+  const t=today(),out=[];
+  for(let i=n-1;i>=0;i--){
+    const d=new Date(t.getFullYear(),t.getMonth()-i,1),k=mkey(d);
+    out.push({label:d.toLocaleDateString('en-US',{month:'short'}),
+      amt:D.txns.filter(x=>x.date.slice(0,7)===k&&x.amount<0).reduce((s,x)=>s+(-x.amount),0)});
+  }
+  return out;
+}
+function svgSpend(data,budget){
+  const W=352,CB=78,H=96,n=data.length,bw=W/n;
+  const max=Math.max(budget||0,...data.map(d=>d.amt),1)*1.15;
+  const y=v=>CB-(v/max)*(CB-12);
+  let s='';
+  if(budget){const by=y(budget);
+    s+=`<line x1="0" y1="${by}" x2="${W}" y2="${by}" stroke="#8AA5B5" stroke-width="1" stroke-dasharray="3 3"/>`
+      +`<text x="${W-2}" y="${by-3}" text-anchor="end" font-size="8.5" fill="var(--muted)" font-family="${MONO}">budget ${money(budget)}</text>`;}
+  data.forEach((d,i)=>{
+    const bx=i*bw+4,w=bw-8,by=y(d.amt),over=budget&&d.amt>budget;
+    s+=`<rect x="${bx}" y="${by}" width="${w}" height="${Math.max(2,CB-by)}" rx="3.5" fill="${over?'var(--alert)':i===n-1?'#0D6E62':'#9CC9BE'}"><title>${d.label}: ${money2(d.amt)}</title></rect>`;
+    s+=`<text x="${bx+w/2}" y="${CB+12}" text-anchor="middle" font-size="8.5" fill="var(--muted)" font-family="${MONO}">${d.label}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Spending by month">${s}</svg>`;
+}
+function monthStatus(){
+  const t=today(),ms=new Date(t.getFullYear(),t.getMonth(),1),me=new Date(t.getFullYear(),t.getMonth()+1,0);
+  const g={paid:[],pending:[],overdue:[]};
+  billsBetween(ms,me).forEach(it=>{(isPaid(it)?g.paid:it.date<t?g.overdue:g.pending).push(it);});
+  const amt=l=>l.reduce((s,x)=>s+x.amount,0);
+  return {g,amt};
+}
+function recentActivity(){
+  const acts=[];
+  D.txns.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4).forEach(x=>acts.push({d:x.date,h:
+    `<div class="row"><div class="t"><b>${esc(x.desc||'(no description)')}</b><small>${fmtD(parseD(x.date))} &middot; ${esc(x.category||'uncategorized')}</small></div><div class="amt num ${x.amount>0?'pos':''}">${money2(x.amount)}</div></div>`}));
+  const paid=[];
+  Object.values(D.paid).forEach(ks=>ks.forEach(k=>{const i=k.indexOf('|');paid.push({d:k.slice(0,i),id:k.slice(i+1)});}));
+  paid.sort((a,b)=>b.d.localeCompare(a.d)).slice(0,3).forEach(p=>{
+    const b=D.bills.find(x=>x.id===p.id)||D.debts.filter(x=>'debt_'+x.id===p.id).map(x=>({name:x.name}))[0];
+    if(b) acts.push({d:p.d,h:`<div class="row"><div class="t"><b>${esc(b.name)}</b><small>paid &middot; was due ${fmtD(parseD(p.d))}</small></div><div class="amt num" style="color:var(--good)">&#10003;</div></div>`});
+  });
+  acts.sort((a,b)=>b.d.localeCompare(a.d));
+  return acts.slice(0,6).map(a=>a.h).join('');
+}
+
 function viewHome(){
   const t=today();
   const ms=new Date(t.getFullYear(),t.getMonth(),1), me=new Date(t.getFullYear(),t.getMonth()+1,0);
@@ -468,6 +545,28 @@ function viewHome(){
   </div>
 
   <div class="card">
+    <h2>Next 8 checks</h2>
+    <p class="chelp">Bills scheduled against each paycheck. Tap a bar to open that period.</p>
+    <div class="cbody">${svgChecks()}</div>
+  </div>
+
+  <div class="card">
+    <h2>${t.toLocaleDateString('en-US',{month:'long'})} payment status</h2>
+    ${(()=>{const {g,amt}=monthStatus();const tot=Math.max(1,amt(g.paid)+amt(g.pending)+amt(g.overdue));
+      return `<div class="cbody">
+      <div class="statusbar">
+        ${amt(g.paid)?`<i style="width:${amt(g.paid)/tot*100}%;background:var(--good)"></i>`:''}
+        ${amt(g.pending)?`<i style="width:${amt(g.pending)/tot*100}%;background:#D5DCE2"></i>`:''}
+        ${amt(g.overdue)?`<i style="width:${amt(g.overdue)/tot*100}%;background:var(--alert)"></i>`:''}
+      </div>
+      <div class="statkey">
+        <span><i class="dot" style="background:var(--good)"></i>&#10003; ${g.paid.length} paid &middot; ${money(amt(g.paid))}</span>
+        <span><i class="dot" style="background:#D5DCE2"></i>&#9711; ${g.pending.length} pending &middot; ${money(amt(g.pending))}</span>
+        <span><i class="dot" style="background:var(--alert)"></i>&#9888; ${g.overdue.length} overdue &middot; ${money(amt(g.overdue))}</span>
+      </div></div>`})()}
+  </div>
+
+  <div class="card">
     <h2>Next up</h2>
     <p class="chelp">Bills landing before ${fmtD(pe)}. Tap the box when one is paid.</p>
     <div style="margin-top:10px">
@@ -483,11 +582,17 @@ function viewHome(){
         <span style="color:var(--muted);font-size:12.5px">of ${money(Object.values(D.budgets).reduce((s,v)=>s+(+v||0),0))} planned</span>
       </div>
       <div class="pbar"><i style="width:${Math.min(100,spend/Math.max(1,Object.values(D.budgets).reduce((s,v)=>s+(+v||0),0))*100)}%"></i></div>
+      <div style="margin-top:12px">${svgSpend(spendMonths(6),Object.values(D.budgets).reduce((s,v)=>s+(+v||0),0))}</div>
       <div class="btnrow" style="margin-top:12px">
         <button class="btn sm" data-sheet="txn">Add a purchase</button>
         <button class="btn sm" data-sheet="import">Import bank CSV</button>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent activity</h2>
+    <div style="margin-top:10px">${recentActivity()||'<div class="empty">Purchases and paid bills will show up here.</div>'}</div>
   </div>
 
   <div class="card">
@@ -503,21 +608,7 @@ function viewHome(){
     </div>
   </div>
 
-  <div class="card">
-    <h2>Your data</h2>
-    <div class="cbody">
-      <p class="note" style="margin-top:0">${SYNC?`Synced through <b>${esc(SYNC.repo)}</b> so both phones see the same budget.`:'Everything lives on this device only. Nothing is sent anywhere unless you turn on sync.'}</p>
-      <p class="note" id="sync-status">${syncStatusText()}</p>
-      <div class="btnrow" style="margin-top:10px">
-        ${SYNC?'<button class="btn sm pri" data-act="sync-now">Sync now</button>':''}
-        <button class="btn sm" data-sheet="income">Income &amp; payday</button>
-        <button class="btn sm" data-sheet="sync">${SYNC?'Sync settings':'Set up sync'}</button>
-        <button class="btn sm" data-act="export">Export backup</button>
-        <button class="btn sm" data-act="import-json">Restore backup</button>
-        <button class="btn sm danger" data-act="reset">Start over</button>
-      </div>
-    </div>
-  </div>`;
+  <p class="note" style="text-align:center;padding:2px 0 8px">Income, sync and backups live behind the &#9881; gear up top.</p>`;
 }
 
 function viewBills(){
@@ -948,6 +1039,32 @@ async function syncNow(){
   if(syncState.again){ syncState.again=false; syncNow(); }
 }
 
+function sheetSettings(){
+  openSheet(shell('Settings',`
+    <div class="card">
+      <h2>Income &amp; sync</h2>
+      <div class="cbody">
+        <p class="note" id="sync-status" style="margin-top:0">${syncStatusText()}</p>
+        <div class="btnrow">
+          <button class="btn sm" data-sheet="income">Income &amp; payday</button>
+          <button class="btn sm" data-sheet="sync">${SYNC?'Sync settings':'Set up sync'}</button>
+          ${SYNC?'<button class="btn sm pri" data-act="sync-now">Sync now</button>':''}
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Your data</h2>
+      <div class="cbody">
+        <p class="note" style="margin-top:0">${SYNC?`Synced through <b>${esc(SYNC.repo)}</b> so both phones see the same budget.`:'Everything lives on this device only. Nothing is sent anywhere unless you turn on sync.'}</p>
+        <div class="btnrow" style="margin-top:8px">
+          <button class="btn sm" data-act="export">Export backup</button>
+          <button class="btn sm" data-act="import-json">Restore backup</button>
+          <button class="btn sm danger" data-act="reset">Start over</button>
+        </div>
+      </div>
+    </div>`));
+}
+
 function sheetIncome(){
   openSheet(shell('Income &amp; payday',`<div class="card"><div class="cbody">
     ${D.income.people.map((p,i)=>`<label class="f"><span>${esc(p.name)}, take-home per paycheck</span>
@@ -974,13 +1091,14 @@ function sheetSync(){
 
 /* ---------- actions ---------- */
 document.addEventListener('click',e=>{
-  const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close],[data-cal]');
+  const el=e.target.closest('[data-tab],[data-pay],[data-sheet],[data-act],[data-edit-bill],[data-edit-debt],[data-fund],[data-close],[data-cal],[data-goto]');
   if(!el) { if(e.target.id==='sheet') closeSheet(); return; }
 
   if(el.dataset.close!==undefined||el.id==='sheet') return closeSheet();
   if(el.dataset.tab){ TAB=el.dataset.tab; render(); window.scrollTo(0,0); return; }
 
   if(el.dataset.cal){ CSEL=CSEL===el.dataset.cal?null:el.dataset.cal; render(); return; }
+  if(el.dataset.goto!==undefined){ POFF=+el.dataset.goto; TAB='bills'; render(); window.scrollTo(0,0); return; }
   if(el.dataset.pay){
     const [d,bid]=el.dataset.pay.split('|');
     togglePaid({date:parseD(d),bill:{id:bid}}); render(); return;
@@ -989,7 +1107,7 @@ document.addEventListener('click',e=>{
   if(el.dataset.editDebt){ return sheetDebt(D.debts.find(b=>b.id===el.dataset.editDebt)); }
   if(el.dataset.fund){ return sheetAddToFund(D.funds.find(f=>f.id===el.dataset.fund)); }
   if(el.dataset.sheet){
-    return {txn:sheetTxn,budgets:sheetBudgets,bill:()=>sheetBill(),fund:()=>sheetFund(),import:sheetImport,sync:sheetSync,income:sheetIncome}[el.dataset.sheet]();
+    return {txn:sheetTxn,budgets:sheetBudgets,bill:()=>sheetBill(),fund:()=>sheetFund(),import:sheetImport,sync:sheetSync,income:sheetIncome,settings:sheetSettings}[el.dataset.sheet]();
   }
 
   const a=el.dataset.act, g=id=>document.getElementById(id), v=id=>g(id).value.trim();
