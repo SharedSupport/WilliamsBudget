@@ -1,5 +1,5 @@
 /* Offline shell. Bump CACHE when you change any file. */
-const CACHE = 'ledger-v5';
+const CACHE = 'ledger-v6';
 const FILES = ['./', './index.html', './manifest.json', './logo.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
