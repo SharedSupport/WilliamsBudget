@@ -64,7 +64,10 @@ header .eyebrow{color:#7EA0B4}
 main{padding-top:14px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--lift);margin-bottom:12px;overflow:hidden}
 .card>h2{margin:0;padding:13px 15px 0;font-size:13px;font-weight:600;letter-spacing:.01em}
-.card>h2+.chelp{padding:2px 15px 0;font-size:12px;color:var(--muted);margin:0}
+.card>h2+.chelp,.mhead+.chelp{padding:2px 15px 0;font-size:12px;color:var(--muted);margin:0}
+.mhead{display:flex;align-items:center;gap:8px;padding:11px 15px 0}
+.mhead h2{margin:0;font-size:13px;font-weight:600;flex:1;text-align:center}
+.mhead .btn.sm{padding:4px 12px}
 .cbody{padding:13px 15px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 13px;box-shadow:var(--lift)}
@@ -303,7 +306,13 @@ const totalFunds=()=>D.funds.reduce((s,f)=>s+(+f.balance||0),0);
 const totalAssets=()=>Object.values(D.assets).reduce((s,v)=>s+(+v||0),0)+totalFunds();
 
 /* ---------- routing ---------- */
-let TAB='home';
+let TAB='home', MOFF=0; // MOFF: viewed month, as an offset from the current month
+const viewMonth=()=>{ const t=today(); return new Date(t.getFullYear(),t.getMonth()+MOFF,1); };
+const mhead=()=>{ const d=viewMonth(); return `<div class="mhead">
+  <button class="btn sm" data-act="mprev" aria-label="Previous month">&#8249;</button>
+  <h2>${d.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</h2>
+  ${MOFF?'<button class="btn sm" data-act="mnow">Today</button>':''}
+  <button class="btn sm" data-act="mnext" aria-label="Next month">&#8250;</button></div>`; };
 const ICONS={
  home:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/>',
  bills:'<rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9.5h17M8 3v3M16 3v3M8 14h3M8 17.5h6"/>',
@@ -448,15 +457,15 @@ function viewHome(){
 }
 
 function viewBills(){
-  const t=today();
-  const ms=new Date(t.getFullYear(),t.getMonth(),1), me=new Date(t.getFullYear(),t.getMonth()+1,0);
+  const vm=viewMonth();
+  const ms=vm, me=new Date(vm.getFullYear(),vm.getMonth()+1,0);
   const items=billsBetween(ms,me);
   const norm=D.bills.reduce((s,b)=>s+monthlyEq(b),0);
   const mins=D.debts.reduce((s,d)=>s+(+d.min||0),0);
   return `
   <div class="card">
-    <h2>${t.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</h2>
-    <p class="chelp">${money(items.reduce((s,i)=>s+i.amount,0))} across ${items.length} payments</p>
+    ${mhead()}
+    <p class="chelp">${money(items.reduce((s,i)=>s+i.amount,0))} across ${items.length} payments${MOFF>0?' &middot; projected':''}</p>
     <div style="margin-top:10px">${items.map(billRow).join('')||'<div class="empty">No bills this month.</div>'}</div>
   </div>
 
@@ -477,14 +486,14 @@ const WD=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'
 const ord=n=>n+(['th','st','nd','rd'][(n%100>>3^1&&n%10)<4?n%10:0]||'th');
 
 function viewSpend(){
-  const t=today(), m=mkey(t);
+  const vm=viewMonth(), m=mkey(vm);
   const tx=D.txns.filter(x=>x.date.slice(0,7)===m).sort((a,b)=>b.date.localeCompare(a.date));
   const by={}; tx.filter(x=>x.amount<0).forEach(x=>by[x.category||'Other']=(by[x.category||'Other']||0)+(-x.amount));
   const cats=[...new Set([...CATS,...Object.keys(by)])];
   const unc=tx.filter(x=>!x.category).length;
   return `
   <div class="card">
-    <h2>Categories, ${t.toLocaleDateString('en-US',{month:'long'})}</h2>
+    ${mhead()}
     <div style="margin-top:10px">
     ${cats.map(c=>{const sp=by[c]||0,bg=+D.budgets[c]||0;if(!sp&&!bg)return'';
       const pct=bg?Math.min(100,sp/bg*100):0;const over=bg&&sp>bg;
@@ -880,6 +889,9 @@ document.addEventListener('click',e=>{
   }
   else if(a==='sync-off'){ SYNC=null; store.set(SYNCKEY,''); clearTimeout(syncTimer); closeSheet(); render(); }
   else if(a==='sync-now'){ syncNow(); }
+  else if(a==='mprev'){ MOFF--; render(); }
+  else if(a==='mnext'){ MOFF++; render(); }
+  else if(a==='mnow'){ MOFF=0; render(); }
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
     csvRows().forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
