@@ -238,7 +238,7 @@ function seed(){ return {
     {id:'f3',name:'Vacation Fund', balance:0,  goal:5000,target:'2027-08-14'},
     {id:'f4',name:'Home Repairs',  balance:0,  goal:1000,target:'2027-08-14'}
   ],
-  budgets:{Groceries:600,Gas:200,Restaurants:150,Entertainment:100,Household:100,Personal:100},
+  budgets:{Groceries:600,Gas:200,Restaurants:150,Entertainment:100,Household:100,Automotive:150,Personal:100},
   smooth:true,
   pslf:{made:71,required:120},
   assets:{'Checking / Cash':0,'Retirement / Investments':0,'Home / Property':0,'Other':0},
@@ -266,6 +266,11 @@ function seed(){ return {
     {m:'tractor supply',c:'Household'},{m:'staples',c:'Household'},{m:'ikea',c:'Household'},{m:'wayfair',c:'Household'},
     {m:'big lots',c:'Household'},{m:'ollie',c:'Household'},{m:'boscov',c:'Household'},{m:'michaels',c:'Household'},
     {m:'hobby lobby',c:'Household'},
+    {m:'autozone',c:'Automotive'},{m:'advance auto',c:'Automotive'},{m:'reilly auto',c:'Automotive'},{m:'napa',c:'Automotive'},
+    {m:'pep boys',c:'Automotive'},{m:'jiffy lube',c:'Automotive'},{m:'valvoline',c:'Automotive'},{m:'midas',c:'Automotive'},
+    {m:'monro',c:'Automotive'},{m:'goodyear',c:'Automotive'},{m:'firestone',c:'Automotive'},{m:'tire',c:'Automotive'},
+    {m:'auto parts',c:'Automotive'},{m:'auto repair',c:'Automotive'},{m:'car wash',c:'Automotive'},{m:'carwash',c:'Automotive'},
+    {m:'inspection',c:'Automotive'},{m:'automotive',c:'Automotive'},{m:'transmission',c:'Automotive'},{m:'muffler',c:'Automotive'},
     {m:'cvs',c:'Personal'},{m:'walgreens',c:'Personal'},{m:'rite aid',c:'Personal'},{m:'ulta',c:'Personal'},
     {m:'sephora',c:'Personal'},{m:'great clips',c:'Personal'},{m:'salon',c:'Personal'},{m:'barber',c:'Personal'},
     {m:'pharmacy',c:'Personal'}
@@ -276,8 +281,9 @@ function seed(){ return {
    reach existing installs, and newer fields always exist. */
 function hydrate(p){
   const d=Object.assign(seed(),p);
-  d.rules=d.rules||[]; d.txns=d.txns||[]; d.deleted=d.deleted||[]; d.paid=d.paid||{};
+  d.rules=d.rules||[]; d.txns=d.txns||[]; d.deleted=d.deleted||[]; d.paid=d.paid||{}; d.budgets=d.budgets||{};
   seed().rules.forEach(r=>{ if(!d.rules.some(x=>x.m===r.m)) d.rules.push(r); });
+  Object.entries(seed().budgets).forEach(([k,v])=>{ if(!(k in d.budgets)) d.budgets[k]=v; });
   return d;
 }
 let D = (()=>{ const r=store.get(KEY); if(!r) return seed();
@@ -288,7 +294,7 @@ const save=(queue=true)=>{
 };
 
 /* ---------- helpers ---------- */
-const CATS=['Groceries','Gas','Restaurants','Entertainment','Household','Personal','Other'];
+const CATS=['Groceries','Gas','Restaurants','Entertainment','Household','Automotive','Personal','Other'];
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:Math.abs(n)>=1000?0:2}).format(n||0);
 const money2=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n||0);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
