@@ -1,0 +1,10 @@
+# Never commit real financial data — the published site is only as private as this repo.
+ledger-backup*.json
+*backup*.json
+*.csv
+*.xlsx
+*.xlsm
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
