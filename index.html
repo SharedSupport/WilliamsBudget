@@ -9,6 +9,7 @@
 <title>Household Ledger</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -43,6 +44,8 @@ body{
 header{background:var(--deep);color:#EAF0F4;padding:calc(14px + env(safe-area-inset-top)) 0 20px;border-bottom-left-radius:20px;border-bottom-right-radius:20px}
 header .eyebrow{color:#7EA0B4}
 .hdrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.hlogo{width:46px;height:46px;border-radius:12px;flex:none;margin-top:3px}
+.locklogo{width:96px;height:96px;border-radius:22px;margin-bottom:14px}
 .hbig{font-size:31px;font-weight:600;margin:2px 0 0;letter-spacing:-.02em}
 .hsub{font-size:12.5px;color:#9DB6C6;margin-top:3px}
 .pill{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:5px 11px;font-size:12px;color:#CFE0EA;white-space:nowrap}
@@ -150,6 +153,7 @@ body.locked{overflow:hidden}
 
 <div id="lock" role="dialog" aria-modal="true" aria-label="Enter PIN">
   <div class="lockbox">
+    <img class="locklogo" src="logo.png" alt="">
     <div class="eyebrow">Household Ledger</div>
     <h1>Enter PIN</h1>
     <input id="pin-in" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="PIN">
@@ -345,7 +349,8 @@ function renderHeader(){
 
   document.getElementById('hdr').innerHTML=`
     <div class="hdrow">
-      <div>
+      <img class="hlogo" src="logo.png" alt="">
+      <div style="flex:1;min-width:0">
         <div class="eyebrow">Left to pay this pay period</div>
         <div class="hbig num">${money(remaining)}</div>
         <div class="hsub">${items.filter(i=>!isPaid(i)).length} of ${items.length} bills still open &middot; through ${fmtD(winEnd)}</div>
