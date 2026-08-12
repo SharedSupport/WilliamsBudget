@@ -310,7 +310,7 @@ const totalFunds=()=>D.funds.reduce((s,f)=>s+(+f.balance||0),0);
 const totalAssets=()=>Object.values(D.assets).reduce((s,v)=>s+(+v||0),0)+totalFunds();
 
 /* ---------- routing ---------- */
-let TAB='home', MOFF=0; // MOFF: viewed month, as an offset from the current month
+let TAB='home', MOFF=0, POFF=0; // MOFF: viewed month offset (Spending); POFF: viewed pay-period offset (Bills)
 const viewMonth=()=>{ const t=today(); return new Date(t.getFullYear(),t.getMonth()+MOFF,1); };
 const mhead=()=>{ const d=viewMonth(); return `<div class="mhead">
   <button class="btn sm" data-act="mprev" aria-label="Previous month">&#8249;</button>
@@ -462,16 +462,33 @@ function viewHome(){
 }
 
 function viewBills(){
-  const vm=viewMonth();
-  const ms=vm, me=new Date(vm.getFullYear(),vm.getMonth()+1,0);
-  const items=billsBetween(ms,me);
+  const start=periodStart(); start.setDate(start.getDate()+POFF*14);
+  const end=new Date(start); end.setDate(end.getDate()+13);
+  const items=billsBetween(start,end);
+  const pay=biweekly();
+  const tot=items.reduce((s,i)=>s+i.amount,0);
+  const open=items.filter(i=>!isPaid(i)).reduce((s,i)=>s+i.amount,0);
+  const left=pay-tot;
   const norm=D.bills.reduce((s,b)=>s+monthlyEq(b),0);
   const mins=D.debts.reduce((s,d)=>s+(+d.min||0),0);
   return `
   <div class="card">
-    ${mhead()}
-    <p class="chelp">${money(items.reduce((s,i)=>s+i.amount,0))} across ${items.length} payments${MOFF>0?' &middot; projected':''}</p>
-    <div style="margin-top:10px">${items.map(billRow).join('')||'<div class="empty">No bills this month.</div>'}</div>
+    <div class="mhead">
+      <button class="btn sm" data-act="pprev" aria-label="Previous pay period">&#8249;</button>
+      <h2>${fmtD(start)} &ndash; ${fmtD(end)}</h2>
+      ${POFF?'<button class="btn sm" data-act="pnow">Today</button>':''}
+      <button class="btn sm" data-act="pnext" aria-label="Next pay period">&#8250;</button>
+    </div>
+    <p class="chelp">Pay period &middot; ${money(pay)} lands ${fmtD(start)}${POFF>0?' &middot; projected':''}</p>
+    <div class="cbody" style="padding-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span class="num" style="font-size:22px;font-weight:600">${money(tot)} <span style="color:var(--muted);font-weight:400;font-size:12.5px">in bills</span></span>
+        <span class="num" style="font-size:13px;font-weight:600;color:${left<0?'var(--alert)':'var(--good)'}">${left<0?money(-left)+' short':money(left)+' left over'}</span>
+      </div>
+      <div class="pbar"><i style="width:${Math.min(100,tot/Math.max(1,pay)*100)}%;background:${left<0?'var(--alert)':'var(--good)'}"></i></div>
+      <p class="note" style="margin-top:6px">${items.length} payments this period &middot; ${open?money(open)+' still unpaid':'all paid'}</p>
+    </div>
+    <div>${items.map(billRow).join('')||'<div class="empty">Nothing due this pay period.</div>'}</div>
   </div>
 
   <div class="card">
@@ -897,6 +914,9 @@ document.addEventListener('click',e=>{
   else if(a==='mprev'){ MOFF--; render(); }
   else if(a==='mnext'){ MOFF++; render(); }
   else if(a==='mnow'){ MOFF=0; render(); }
+  else if(a==='pprev'){ POFF--; render(); }
+  else if(a==='pnext'){ POFF++; render(); }
+  else if(a==='pnow'){ POFF=0; render(); }
   else if(a==='csv-preview'){ csvPreview(); }
   else if(a==='csv-import'){
     csvRows().forEach(r=>{ if(!D.txns.some(t=>t.date===r.date&&t.amount===r.amount&&t.desc===r.desc)) D.txns.push(r); });
