@@ -245,16 +245,43 @@ function seed(){ return {
   paid:{}, txns:[], deleted:[],
   rules:[
     {m:'weis',c:'Groceries'},{m:'giant',c:'Groceries'},{m:'aldi',c:'Groceries'},{m:'wegmans',c:'Groceries'},
+    {m:'kroger',c:'Groceries'},{m:'trader joe',c:'Groceries'},{m:'whole foods',c:'Groceries'},{m:'costco',c:'Groceries'},
+    {m:'sams club',c:'Groceries'},{m:'food lion',c:'Groceries'},{m:'lidl',c:'Groceries'},{m:'grocery',c:'Groceries'},
     {m:'sheetz',c:'Gas'},{m:'turkey hill',c:'Gas'},{m:'sunoco',c:'Gas'},{m:'exxon',c:'Gas'},{m:'wawa',c:'Gas'},
-    {m:'dunkin',c:'Restaurants'},{m:'mcdonald',c:'Restaurants'},{m:'pizza',c:'Restaurants'},
-    {m:'netflix',c:'Entertainment'},{m:'spotify',c:'Entertainment'},{m:'apple.com',c:'Entertainment'},
+    {m:'shell',c:'Gas'},{m:'citgo',c:'Gas'},{m:'marathon',c:'Gas'},{m:'speedway',c:'Gas'},{m:'rutter',c:'Gas'},
+    {m:'gulf oil',c:'Gas'},{m:'pilot',c:'Gas'},{m:'fuel',c:'Gas'},
+    {m:'dunkin',c:'Restaurants'},{m:'mcdonald',c:'Restaurants'},{m:'pizza',c:'Restaurants'},{m:'burger',c:'Restaurants'},
+    {m:'wendy',c:'Restaurants'},{m:'taco bell',c:'Restaurants'},{m:'chipotle',c:'Restaurants'},{m:'subway',c:'Restaurants'},
+    {m:'chick-fil-a',c:'Restaurants'},{m:'starbucks',c:'Restaurants'},{m:'panera',c:'Restaurants'},{m:'kfc',c:'Restaurants'},
+    {m:'arby',c:'Restaurants'},{m:'sonic drive',c:'Restaurants'},{m:'five guys',c:'Restaurants'},{m:'texas roadhouse',c:'Restaurants'},
+    {m:'olive garden',c:'Restaurants'},{m:'applebee',c:'Restaurants'},{m:'ihop',c:'Restaurants'},{m:'denny',c:'Restaurants'},
+    {m:'doordash',c:'Restaurants'},{m:'uber eats',c:'Restaurants'},{m:'grubhub',c:'Restaurants'},{m:'restaurant',c:'Restaurants'},
+    {m:'cafe',c:'Restaurants'},{m:'diner',c:'Restaurants'},{m:'grill',c:'Restaurants'},
+    {m:'netflix',c:'Entertainment'},{m:'spotify',c:'Entertainment'},{m:'apple.com',c:'Entertainment'},{m:'hulu',c:'Entertainment'},
+    {m:'disney',c:'Entertainment'},{m:'hbo',c:'Entertainment'},{m:'paramount',c:'Entertainment'},{m:'peacock',c:'Entertainment'},
+    {m:'youtube',c:'Entertainment'},{m:'steam',c:'Entertainment'},{m:'playstation',c:'Entertainment'},{m:'xbox',c:'Entertainment'},
+    {m:'nintendo',c:'Entertainment'},{m:'cinema',c:'Entertainment'},{m:'theatre',c:'Entertainment'},{m:'amc ',c:'Entertainment'},
     {m:'amazon',c:'Household'},{m:'walmart',c:'Household'},{m:'wal-mart',c:'Household'},{m:'target',c:'Household'},
-    {m:'lowes',c:'Household'},{m:'dollar',c:'Household'},{m:'harbor freight',c:'Household'}
+    {m:'lowes',c:'Household'},{m:'dollar',c:'Household'},{m:'harbor freight',c:'Household'},{m:'home depot',c:'Household'},
+    {m:'tractor supply',c:'Household'},{m:'staples',c:'Household'},{m:'ikea',c:'Household'},{m:'wayfair',c:'Household'},
+    {m:'big lots',c:'Household'},{m:'ollie',c:'Household'},{m:'boscov',c:'Household'},{m:'michaels',c:'Household'},
+    {m:'hobby lobby',c:'Household'},
+    {m:'cvs',c:'Personal'},{m:'walgreens',c:'Personal'},{m:'rite aid',c:'Personal'},{m:'ulta',c:'Personal'},
+    {m:'sephora',c:'Personal'},{m:'great clips',c:'Personal'},{m:'salon',c:'Personal'},{m:'barber',c:'Personal'},
+    {m:'pharmacy',c:'Personal'}
   ]
 };}
 
+/* Merge stored data over the seed, then top up: new built-in category rules
+   reach existing installs, and newer fields always exist. */
+function hydrate(p){
+  const d=Object.assign(seed(),p);
+  d.rules=d.rules||[]; d.txns=d.txns||[]; d.deleted=d.deleted||[]; d.paid=d.paid||{};
+  seed().rules.forEach(r=>{ if(!d.rules.some(x=>x.m===r.m)) d.rules.push(r); });
+  return d;
+}
 let D = (()=>{ const r=store.get(KEY); if(!r) return seed();
-  try{ const p=JSON.parse(r); return Object.assign(seed(),p); }catch(e){ return seed(); } })();
+  try{ return hydrate(JSON.parse(r)); }catch(e){ return seed(); } })();
 const save=(queue=true)=>{
   D.updatedAt=Date.now(); store.set(KEY,JSON.stringify(D));
   if(queue&&SYNC&&SYNC.token){ clearTimeout(syncTimer); syncTimer=setTimeout(syncNow,2500); }
@@ -775,7 +802,7 @@ function viewSpend(){
         <button class="btn sm" data-sheet="import">Import bank CSV</button>
         <button class="btn sm" data-sheet="budgets">Set budgets</button>
       </div>
-      ${unc?`<p class="note">${unc} transaction${unc>1?'s':''} need a category.</p>`:''}
+      ${unc?`<p class="note">${unc} transaction${unc>1?'s':''} need a category. <button class="btn sm" data-act="autocat" style="margin-left:6px">Auto-fill</button></p>`:''}
     </div>
   </div>
 
@@ -783,7 +810,7 @@ function viewSpend(){
     <h2>Transactions</h2>
     <div style="margin-top:10px">
     ${tx.length?tx.slice(0,80).map(x=>`<div class="row">
-      <div class="t" data-txn="${x.id}" style="cursor:pointer"><b>${esc(x.desc||'(no description)')}</b><small>${fmtD(parseD(x.date))}${x.account?' &middot; '+esc(x.account):''}${x.notes?' &middot; &#128221;':''}</small></div>
+      <div class="t" data-txn="${x.id}" style="cursor:pointer"><b>${esc(x.desc||'(no description)')}</b><small>${fmtD(parseD(x.date))}${x.location?' &middot; &#128205;'+esc(x.location):''}${x.notes?' &middot; &#128221;':''}</small></div>
       <select data-cat="${x.id}" style="width:auto;padding:5px 7px;font-size:12px;border-radius:7px">
         <option value="">Pick one</option>
         ${cats.map(c=>`<option ${x.category===c?'selected':''}>${esc(c)}</option>`).join('')}
@@ -1021,6 +1048,7 @@ function txnsFromLines(lines){
       .replace(/debit card .*?post: ?\d{1,2}\/\d{1,2}/i,'')
       .replace(/pos #\d+/i,'')
       .replace(/eff\. ?date \d{1,2}\/\d{1,2}.*/i,'')
+      .replace(/\b\d{3}[- .]\d{3}[- .]\d{4}\b/g,'')
       .replace(/\b\d{6,}\b/g,'')
       .replace(/\s+\d(?=\s|$)/g,'')
       .replace(/\s+/g,' ').trim();
@@ -1029,7 +1057,9 @@ function txnsFromLines(lines){
     else if(!explicit&&!/deposit|payroll|direct dep|credit|refund|interest/i.test(L)) a=-a;
     const y=dm[3]?(+dm[3]<100?2000+ +dm[3]:+dm[3]):fy;
     const d=new Date(y,+dm[1]-1,+dm[2]); if(isNaN(d)) return;
-    out.push({id:uid(),date:iso(d),desc:desc.slice(0,60),amount:a,category:catFor(desc),account:acct||undefined});
+    const {desc:md,loc}=extractLoc(desc);
+    out.push({id:uid(),date:iso(d),desc:md.slice(0,60),amount:a,category:catFor(md),
+      location:loc||undefined,account:acct||undefined});
   });
   return out;
 }
@@ -1081,6 +1111,33 @@ function mapUI(){
     <div id="csv-prev"></div>`;
 }
 function catFor(desc){ const d=(desc||'').toLowerCase(); const r=D.rules.find(r=>d.includes(r.m)); return r?r.c:''; }
+
+/* City/state pulled off the end of a merchant string, e.g.
+   "WAWA 8201 SUNBURY PA" -> { desc:"WAWA 8201", loc:"Sunbury, PA" } */
+const STATES=new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'.split(' '));
+const NOTCITY=/^(inc|llc|co|corp|company|hardware|online|service|services|store|stores|shop|market|markets|center|centers|supply|group|the|of)$/i;
+function extractLoc(desc){
+  const m=(desc||'').match(/^(.*?)[ ,]+([A-Za-z][A-Za-z .'-]{2,17}?)\s+([A-Z]{2})$/);
+  if(m&&STATES.has(m[3])&&m[1].trim()){
+    const city=m[2].trim();
+    if(!city.split(/\s+/).some(w=>NOTCITY.test(w)))
+      return {desc:m[1].trim(),loc:city.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase())+', '+m[3]};
+  }
+  return {desc:desc,loc:''};
+}
+/* Merchant fingerprint a category rule is learned from: leading words,
+   minus store numbers and noise. */
+function merchKey(desc){
+  const toks=(desc||'').toLowerCase().replace(/[#*]/g,' ').split(/\s+/).filter(w=>/[a-z]/.test(w));
+  if(!toks.length) return '';
+  const key=toks[0].length>=4?toks[0]:toks.slice(0,2).join(' ');
+  return key.length>=3?key:'';
+}
+function autoCategorize(){
+  let n=0;
+  D.txns.forEach(x=>{ if(!x.category){ const c=catFor(x.desc); if(c){x.category=c;n++;} } });
+  return n;
+}
 function csvRows(){
   const di=+document.getElementById('m-date').value, si=+document.getElementById('m-desc').value,
         ai=+document.getElementById('m-amt').value, sign=document.getElementById('m-sign').value;
@@ -1089,8 +1146,8 @@ function csvRows(){
     let amt=parseFloat(raw); if(isNaN(amt)) return null;
     if(sign==='pos') amt=-Math.abs(amt);
     const d=new Date(r[di]); if(isNaN(d)) return null;
-    const desc=(r[si]||'').trim();
-    return {id:uid(),date:iso(d),desc,amount:amt,category:catFor(desc)};
+    const {desc,loc}=extractLoc((r[si]||'').trim());
+    return {id:uid(),date:iso(d),desc,amount:amt,category:catFor(desc),location:loc||undefined};
   }).filter(Boolean);
 }
 function csvPreview(){
@@ -1155,7 +1212,7 @@ async function syncNow(){
     let sha=null, remote=null;
     if(r.status===200){ const j=await r.json(); sha=j.sha; remote=JSON.parse(b64d(j.content)); }
     else if(r.status!==404) throw new Error(r.status===401?'token rejected':r.status===403?'no access to repo':'GitHub said '+r.status);
-    D=Object.assign(seed(),mergeDocs(D,remote)); save(false);
+    D=hydrate(mergeDocs(D,remote)); save(false);
     const body=JSON.stringify(D,null,1);
     if(!remote||JSON.stringify(Object.assign(seed(),remote),null,1)!==body){
       const w=await fetch(ghURL(),{method:'PUT',headers:ghHdrs(),
@@ -1181,6 +1238,7 @@ function sheetTxnDetail(id){
       <label class="f"><span>Date</span><input id="td-date" type="date" value="${esc(x.date)}"></label>
     </div>
     <label class="f"><span>Category</span><select id="td-cat"><option value="">None</option>${cats.map(c=>`<option ${x.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+    <label class="f"><span>&#128205; Location</span><input id="td-loc" value="${esc(x.location||'')}" placeholder="Sunbury, PA"></label>
     <label class="f"><span>Notes</span><textarea id="td-notes" rows="2" placeholder="Anything worth remembering about this one">${esc(x.notes||'')}</textarea></label>
     ${x.account?`<p class="note" style="margin-top:0">Account: ${esc(x.account)}</p>`:''}
     <div class="btnrow"><button class="btn pri" data-act="td-save">Save</button>
@@ -1320,7 +1378,7 @@ document.addEventListener('click',e=>{
     const x=D.txns.find(t=>t.id===v('td-id')); if(!x) return closeSheet();
     const amt=parseFloat(v('td-amt')); if(isNaN(amt)) return g('td-amt').focus();
     x.desc=v('td-desc'); x.amount=amt; x.date=v('td-date')||x.date;
-    x.category=v('td-cat'); x.notes=v('td-notes');
+    x.category=v('td-cat'); x.notes=v('td-notes'); x.location=v('td-loc');
     save(); closeSheet(); render();
   }
   else if(a==='td-del'){
@@ -1336,6 +1394,7 @@ document.addEventListener('click',e=>{
     });
     PDFROWS=null; save(); closeSheet(); TAB='spend'; render();
   }
+  else if(a==='autocat'){ autoCategorize(); save(); render(); }
   else if(a==='clear-month'){
     const m=mkey(viewMonth());
     const doomed=D.txns.filter(x=>x.date.slice(0,7)===m);
@@ -1358,7 +1417,7 @@ document.addEventListener('click',e=>{
   else if(a==='import-json'){
     const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
     inp.onchange=()=>{ const r=new FileReader();
-      r.onload=()=>{ try{ D=Object.assign(seed(),JSON.parse(r.result)); save(); render(); }
+      r.onload=()=>{ try{ D=hydrate(JSON.parse(r.result)); save(); render(); }
                      catch(err){ alert('That file could not be read as a backup.'); } };
       r.readAsText(inp.files[0]); };
     inp.click();
@@ -1374,8 +1433,12 @@ document.addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.cat){
     const tx=D.txns.find(x=>x.id===t.dataset.cat); tx.category=t.value;
-    const w=(tx.desc||'').toLowerCase().split(/\s+/).filter(x=>x.length>3)[0];
-    if(w&&t.value&&!D.rules.some(r=>r.m===w)) D.rules.push({m:w,c:t.value});
+    if(t.value){
+      const key=merchKey(tx.desc);
+      if(key&&!D.rules.some(r=>r.m===key)) D.rules.push({m:key,c:t.value});
+      const n=autoCategorize(); // one pick teaches the merchant; fill the rest
+      save(); if(n){ render(); return; }
+    }
     save(); renderHeader();
   }
   else if(t.dataset.budget){ D.budgets[t.dataset.budget]=+t.value||0; save(); }
