@@ -103,22 +103,55 @@ def occurrences(b, start, end, anchor):
     return out
 
 
-def build_message(D, today):
-    anchor = parse_d(D["income"]["anchorPayday"])
-    pay = sum(float(p.get("amount") or 0) for p in D["income"]["people"])
-    start, end = today, today + timedelta(days=13)
-    items = []
+def collect(D, start, end, anchor):
+    """[date, name, amount, movable] for every payment due in [start, end]."""
+    out = []
     for b in D.get("bills", []):
         for d in occurrences(b, start, end, anchor):
-            items.append((d, b["name"], float(b.get("amount") or 0)))
+            out.append([d, b["name"], float(b.get("amount") or 0), b.get("freq") != "perpaycheck"])
     for dt in D.get("debts", []):
         if float(dt.get("min") or 0) > 0 and float(dt.get("balance") or 0) > 0:
             for d in occurrences({"freq": "monthly", "dueDay": dt.get("dueDay", 1)}, start, end, anchor):
-                items.append((d, dt["name"] + " min", float(dt["min"])))
-    items.sort()
-    total = sum(a for _, _, a in items)
+                out.append([d, dt["name"] + " min", float(dt["min"]), True])
+    return out
+
+
+def build_plan(D, start0, anchor, n=8):
+    """Mirror the app's smoothing: level adjacent periods by sliding a bill
+    one paycheck earlier than its due date. Returns period-0 items as
+    (date, name, amount, early)."""
+    items = []  # [date, name, amount, movable, due, at]
+    for i in range(n):
+        s = start0 + timedelta(days=14 * i)
+        for d, name, amt, mov in collect(D, s, s + timedelta(days=13), anchor):
+            items.append([d, name, amt, mov, i, i])
+    if D.get("smooth", True):
+        load = lambda i: sum(x[2] for x in items if x[5] == i)
+        for _ in range(10):
+            moved = False
+            for i in range(1, n):
+                while True:
+                    li, lp = load(i), load(i - 1)
+                    if li <= lp + 0.01: break
+                    cands = [x for x in items if x[5] == i and x[4] == i and x[3]]
+                    best, best_diff = None, li - lp
+                    for x in cands:
+                        d = abs((li - x[2]) - (lp + x[2]))
+                        if d < best_diff - 0.01: best_diff, best = d, x
+                    if best is None: break
+                    best[5] = i - 1; moved = True
+            if not moved: break
+    return sorted([(x[0], x[1], x[2], x[5] < x[4]) for x in items if x[5] == 0])
+
+
+def build_message(D, today):
+    anchor = parse_d(D["income"]["anchorPayday"])
+    pay = sum(float(p.get("amount") or 0) for p in D["income"]["people"])
+    end = today + timedelta(days=13)
+    items = build_plan(D, today, anchor)
+    total = sum(a for _, _, a, _ in items)
     lines = [f"Payday! ${pay:,.0f} in. Bills thru {end.month}/{end.day}: ${total:,.0f}"]
-    lines += [f"{d.month}/{d.day} {n[:18]} ${a:,.0f}" for d, n, a in items]
+    lines += [f"{d.month}/{d.day} {n[:18]} ${a:,.0f}" + (" (early)" if e else "") for d, n, a, e in items]
     left = pay - total
     lines.append(("Left: $" + f"{left:,.0f}") if left >= 0 else ("SHORT $" + f"{-left:,.0f}"))
     lines.append(os.environ.get("LEDGER_URL", "https://sharedsupport.github.io/WilliamsBudget/"))

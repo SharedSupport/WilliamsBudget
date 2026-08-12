@@ -232,6 +232,7 @@ function seed(){ return {
     {id:'f4',name:'Home Repairs',  balance:0,  goal:1000,target:'2027-08-14'}
   ],
   budgets:{Groceries:600,Gas:200,Restaurants:150,Entertainment:100,Household:100,Personal:100},
+  smooth:true,
   pslf:{made:71,required:120},
   assets:{'Checking / Cash':0,'Retirement / Investments':0,'Home / Property':0,'Other':0},
   paid:{}, txns:[],
@@ -314,6 +315,46 @@ function billsBetween(from,to){
   });
   return out.sort((a,b)=>a.date-b.date);
 }
+/* ---------- payment smoothing ----------
+   A bill may be PAID one paycheck before it is DUE. When smoothing is on,
+   adjacent pay periods are leveled: while a period carries more than the
+   one before it, its best-fitting bill slides back, so shorts are absorbed
+   by lighter checks and leftovers even out. Per-paycheck items never move. */
+function buildPlan(n){
+  const ps=periodStart(), periods=[], items=[];
+  for(let i=0;i<n;i++){
+    const s=new Date(ps); s.setDate(s.getDate()+14*i);
+    const e=new Date(s); e.setDate(e.getDate()+13);
+    periods.push({start:s,end:e});
+    billsBetween(s,e).forEach(it=>items.push(Object.assign({},it,{due:i,at:i})));
+  }
+  if(D.smooth!==false){
+    const load=i=>items.reduce((s,x)=>s+(x.at===i?x.amount:0),0);
+    for(let pass=0;pass<10;pass++){
+      let moved=false;
+      for(let i=1;i<n;i++){
+        while(true){
+          const li=load(i),lp=load(i-1);
+          if(li<=lp+0.01) break;
+          let best=null,bestDiff=li-lp;
+          items.forEach(x=>{
+            if(x.at!==i||x.due!==i||x.bill.freq==='perpaycheck') return;
+            const d=Math.abs((li-x.amount)-(lp+x.amount));
+            if(d<bestDiff-0.01){bestDiff=d;best=x;}
+          });
+          if(!best) break;
+          best.at=i-1; moved=true;
+        }
+      }
+      if(!moved) break;
+    }
+  }
+  periods.forEach((p,i)=>{
+    p.items=items.filter(x=>x.at===i).map(x=>{x.early=x.at<x.due;return x;}).sort((a,b)=>a.date-b.date);
+  });
+  return periods;
+}
+
 const paidKey=it=>`${iso(it.date)}|${it.bill.id}`;
 const isPaid=it=>{ const m=mkey(it.date); return !!(D.paid[m]&&D.paid[m].includes(paidKey(it))); };
 function togglePaid(it){
@@ -351,10 +392,9 @@ function renderTabs(){
 
 /* ---------- header + runway ---------- */
 function renderHeader(){
-  const t=today(), np=nextPayday(), ps=periodStart();
-  const pe=new Date(np); pe.setDate(pe.getDate()-(np>t?1:0));
-  const winEnd=new Date(ps); winEnd.setDate(winEnd.getDate()+13);
-  const items=billsBetween(ps,winEnd);
+  const t=today(), np=nextPayday();
+  const cur=buildPlan(8)[0];
+  const items=cur.items, winEnd=cur.end;
   const pay=biweekly();
   const billsTot=items.filter(i=>i.kind==='bill').reduce((s,i)=>s+i.amount,0);
   const debtTot=items.filter(i=>i.kind==='debt').reduce((s,i)=>s+i.amount,0);
@@ -393,7 +433,8 @@ function renderHeader(){
 /* ---------- views ---------- */
 function billRow(it){
   const t=today(), dd=days(t,it.date), p=isPaid(it);
-  const tag = p?'' : dd<0?`<span class="tag late">${-dd}d late</span>`
+  const tag = p?'' : it.early?'<span class="tag soon">pay early</span>'
+            : dd<0?`<span class="tag late">${-dd}d late</span>`
             : dd===0?'<span class="tag soon">Due today</span>'
             : dd<=5?`<span class="tag soon">in ${dd}d</span>`
             : `<span class="tag">${fmtD(it.date)}</span>`;
@@ -412,8 +453,8 @@ function viewHome(){
   const month=billsBetween(ms,me);
   const monthTot=month.reduce((s,i)=>s+i.amount,0);
   const monthLeft=month.filter(i=>!isPaid(i)).reduce((s,i)=>s+i.amount,0);
-  const ps=periodStart(); const pe=new Date(ps); pe.setDate(pe.getDate()+13);
-  const upcoming=billsBetween(ps,pe).filter(i=>!isPaid(i)).slice(0,8);
+  const cur=buildPlan(8)[0]; const pe=cur.end;
+  const upcoming=cur.items.filter(i=>!isPaid(i)).slice(0,8);
   const mIncome=biweekly()*26/12;
   const nw=totalAssets()-totalDebt();
   const spend=D.txns.filter(x=>x.date.slice(0,7)===mkey(t)&&x.amount<0).reduce((s,x)=>s+(-x.amount),0);
@@ -480,9 +521,15 @@ function viewHome(){
 }
 
 function viewBills(){
-  const start=periodStart(); start.setDate(start.getDate()+POFF*14);
-  const end=new Date(start); end.setDate(end.getDate()+13);
-  const items=billsBetween(start,end);
+  let items,start,end;
+  if(POFF>=0){
+    const per=buildPlan(Math.max(POFF+6,8))[POFF];
+    items=per.items; start=per.start; end=per.end;
+  } else {
+    start=periodStart(); start.setDate(start.getDate()+POFF*14);
+    end=new Date(start); end.setDate(end.getDate()+13);
+    items=billsBetween(start,end);
+  }
   const pay=biweekly();
   const tot=items.reduce((s,i)=>s+i.amount,0);
   const open=items.filter(i=>!isPaid(i)).reduce((s,i)=>s+i.amount,0);
@@ -504,7 +551,8 @@ function viewBills(){
         <span class="num" style="font-size:13px;font-weight:600;color:${left<0?'var(--alert)':'var(--good)'}">${left<0?money(-left)+' short':money(left)+' left over'}</span>
       </div>
       <div class="pbar"><i style="width:${Math.min(100,tot/Math.max(1,pay)*100)}%;background:${left<0?'var(--alert)':'var(--good)'}"></i></div>
-      <p class="note" style="margin-top:6px">${items.length} payments this period &middot; ${open?money(open)+' still unpaid':'all paid'}</p>
+      <p class="note" style="margin-top:6px">${items.length} payments this period &middot; ${open?money(open)+' still unpaid':'all paid'}${D.smooth!==false&&POFF>=0?' &middot; smoothing on: heavy checks lean on the lighter check before':''}</p>
+      <button class="btn sm" data-act="smooth" style="margin-top:4px">${D.smooth!==false?'Turn off smoothing':'Turn on smoothing'}</button>
     </div>
     <div>${items.map(billRow).join('')||'<div class="empty">Nothing due this pay period.</div>'}</div>
   </div>
@@ -990,6 +1038,7 @@ document.addEventListener('click',e=>{
   }
   else if(a==='sync-off'){ SYNC=null; store.set(SYNCKEY,''); clearTimeout(syncTimer); closeSheet(); render(); }
   else if(a==='sync-now'){ syncNow(); }
+  else if(a==='smooth'){ D.smooth=D.smooth===false; save(); render(); }
   else if(a==='mprev'){ MOFF--; render(); }
   else if(a==='mnext'){ MOFF++; render(); }
   else if(a==='mnow'){ MOFF=0; render(); }
